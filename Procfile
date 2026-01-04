@@ -1,0 +1,1 @@
+worker: python telegram_moderation_bot_warnings_fixed.py

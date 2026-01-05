@@ -5,6 +5,7 @@ from enum import IntEnum
 import json
 import os
 import asyncio
+import time
 
 # Настройка логирования
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -36,11 +37,17 @@ WARNINGS_FILE = os.path.join(DATA_DIR, 'warnings_data.json')
 # Время до удаления сообщений (в секундах)
 DELETE_AFTER_SECONDS = 60  # 1 минута
 
+# Кулдаун для команды /stats (в секундах)
+STATS_COOLDOWN = 10
+
 # Максимальное количество выговоров
 MAX_WARNINGS = 3
 
 # Username зама главного админа для оповещений
 DEPUTY_ADMIN_USERNAME = 'the_pr1estesss'
+
+# Словарь для хранения времени последнего использования /stats
+stats_cooldowns = {}
 
 # Иерархия ролей
 class Role(IntEnum):
@@ -57,7 +64,7 @@ class Role(IntEnum):
 # Список пользователей с их ролями (username: роль)
 USERS_ROLES = {
     # ГЛАВНЫЙ АДМИН (не упоминается в отчетах, но может проверять)
-    'zzzzzzzetv': Role.ГЛАВНЫЙ_АДМИН,  # УКАЖИТЕ USERNAME ГЛАВНОГО АДМИНА
+    'главный_админ': Role.ГЛАВНЫЙ_АДМИН,  # УКАЖИТЕ USERNAME ГЛАВНОГО АДМИНА
 
     # Проверяющие всех (не сдают отчеты)
     'the_pr1estesss': Role.ЗАМ_ГЛАВНОГО,
@@ -126,6 +133,17 @@ def get_user_stats(user_id: int):
         }
 
     return stats[user_key]
+
+def get_user_stats_by_username(username: str):
+    """Получить статистику пользователя по username"""
+    stats = load_stats()
+
+    # Ищем пользователя по имени
+    for user_id, data in stats.items():
+        if data.get('name', '').lower() == username.lower():
+            return user_id, data
+
+    return None, None
 
 def update_user_stats(user_id: int, user_name: str, action: str):
     """Обновить статистику пользователя"""
@@ -205,7 +223,7 @@ def add_warning(user_id: int, user_name: str, username: str, reason: str, issued
     warnings[user_key]['history'].append({
         'reason': reason,
         'issued_by': issued_by,
-        'timestamp': str(asyncio.get_event_loop().time()),
+        'timestamp': str(time.time()),
         'action': 'added'
     })
 
@@ -224,7 +242,7 @@ def remove_warning(user_id: int, removed_by: str):
     warnings[user_key]['history'].append({
         'reason': 'Выговор снят',
         'issued_by': removed_by,
-        'timestamp': str(asyncio.get_event_loop().time()),
+        'timestamp': str(time.time()),
         'action': 'removed'
     })
 
@@ -258,7 +276,6 @@ def can_check_report(checker_role: Role, report_type: str) -> bool:
     if checker_role is None:
         return False
 
-    # Главный админ может проверять всё, но не упоминается
     if checker_role >= Role.СТАРШИЙ_АДМИН:
         return True
 
@@ -275,6 +292,12 @@ def can_issue_warning(user_role: Role) -> bool:
 
 def can_remove_warning(user_role: Role) -> bool:
     """Проверка прав на снятие выговоров (СЗМ и выше)"""
+    if user_role is None:
+        return False
+    return user_role >= Role.СЗМ
+
+def can_view_others_stats(user_role: Role) -> bool:
+    """Проверка прав на просмотр чужой статистики (СЗМ и выше)"""
     if user_role is None:
         return False
     return user_role >= Role.СЗМ
@@ -311,11 +334,9 @@ def get_topic_ids_for_category(category: str) -> dict:
 def get_checkers_usernames(category: str) -> list:
     """Получить список юзернеймов проверяющих для категории (БЕЗ главного админа)"""
     if category == 'moderator':
-        # Проверяют: Зам, Старший админ, СЗМ, Админы (БЕЗ главного админа)
         return [username for username, role in USERS_ROLES.items() 
                 if Role.АДМИН <= role < Role.ГЛАВНЫЙ_АДМИН and username]
     elif category == 'admin':
-        # Проверяют: только Зам, Старший админ (БЕЗ главного админа)
         return [username for username, role in USERS_ROLES.items() 
                 if Role.СТАРШИЙ_АДМИН <= role < Role.ГЛАВНЫЙ_АДМИН and username]
     return []
@@ -332,7 +353,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Модераторы и ст.модераторы → Отчетность модерации\n"
         "• Мл.админы, админы, СЗМ → Отчетность администрации\n\n"
         "⚠️ Команды:\n"
-        "/stats - статистика отчетов\n"
+        "/stats - ваша статистика отчетов\n"
+        "/stats @username - статистика другого пользователя (СЗМ+)\n"
         "/vg - выдать выговор (ответ на сообщение + причина)\n"
         "/svg - снять выговор (ответ на сообщение)"
     )
@@ -340,19 +362,146 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(message_text)
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /stats - показать свою статистику"""
-    user = update.message.from_user
-    user_stats = get_user_stats(user.id)
+    """Команда /stats - показать статистику (свою или чужую)"""
+    message = update.message
+    user = message.from_user
+    user_role = get_user_role(user.username)
 
-    stats_message = (
-        f"📊 <b>Статистика отчетов</b>\n\n"
-        f"👤 {user.full_name}\n"
-        f"✅ Принятых: {user_stats['accepted']}\n"
-        f"❌ Отклоненных: {user_stats['rejected']}\n"
-        f"📝 Всего: {user_stats['accepted'] + user_stats['rejected']}"
+    # Проверка кулдауна
+    current_time = time.time()
+    user_key = str(user.id)
+
+    if user_key in stats_cooldowns:
+        time_passed = current_time - stats_cooldowns[user_key]
+        if time_passed < STATS_COOLDOWN:
+            cooldown_left = int(STATS_COOLDOWN - time_passed)
+            cooldown_msg = await message.reply_text(
+                f"⏳ Подождите {cooldown_left} секунд перед следующим использованием /stats"
+            )
+
+            # Удаляем сообщения через минуту
+            asyncio.create_task(
+                delete_messages_after_delay(
+                    context,
+                    message.chat.id,
+                    [message.message_id, cooldown_msg.message_id],
+                    DELETE_AFTER_SECONDS
+                )
+            )
+            return
+
+    # Обновляем время последнего использования
+    stats_cooldowns[user_key] = current_time
+
+    # Определяем чью статистику показывать
+    target_user_id = None
+    target_user_name = None
+    target_username = None
+
+    # Проверяем есть ли аргументы команды
+    text = message.text.strip()
+    parts = text.split(maxsplit=1)
+
+    if len(parts) > 1:
+        # Запрос статистики другого пользователя
+        if not can_view_others_stats(user_role):
+            error_msg = await message.reply_text(
+                "❌ У вас нет прав для просмотра чужой статистики! (требуется СЗМ или выше)"
+            )
+            asyncio.create_task(
+                delete_messages_after_delay(
+                    context,
+                    message.chat.id,
+                    [message.message_id, error_msg.message_id],
+                    DELETE_AFTER_SECONDS
+                )
+            )
+            return
+
+        # Парсим username или mention
+        target_input = parts[1].lstrip('@')
+
+        # Пытаемся найти через reply
+        if message.reply_to_message:
+            target_user = message.reply_to_message.from_user
+            target_user_id = target_user.id
+            target_user_name = target_user.full_name
+            target_username = target_user.username or str(target_user_id)
+
+        # Через entities (mention)
+        elif message.entities:
+            for entity in message.entities:
+                if entity.type == "text_mention":
+                    target_user = entity.user
+                    target_user_id = target_user.id
+                    target_user_name = target_user.full_name
+                    target_username = target_user.username or str(target_user_id)
+                    break
+
+        # Через текстовый username
+        if target_user_id is None:
+            target_username = target_input
+            # Ищем в сохраненной статистике
+            found_id, found_data = get_user_stats_by_username(target_username)
+            if found_id:
+                target_user_id = int(found_id)
+                target_user_name = found_data.get('name', f'@{target_username}')
+            else:
+                # Пользователь не найден
+                error_msg = await message.reply_text(
+                    f"❌ Пользователь @{target_username} не найден в статистике!\n"
+                    f"Возможно, он еще не сдавал отчеты."
+                )
+                asyncio.create_task(
+                    delete_messages_after_delay(
+                        context,
+                        message.chat.id,
+                        [message.message_id, error_msg.message_id],
+                        DELETE_AFTER_SECONDS
+                    )
+                )
+                return
+    else:
+        # Показываем свою статистику
+        target_user_id = user.id
+        target_user_name = user.full_name
+        target_username = user.username
+
+    # Получаем статистику
+    user_stats = get_user_stats(target_user_id)
+
+    # Формируем сообщение
+    if target_user_id == user.id:
+        stats_message = (
+            f"📊 <b>Ваша статистика отчетов</b>\n\n"
+            f"👤 {target_user_name}\n"
+            f"✅ Принятых: {user_stats['accepted']}\n"
+            f"❌ Отклоненных: {user_stats['rejected']}\n"
+            f"📝 Всего: {user_stats['accepted'] + user_stats['rejected']}"
+        )
+    else:
+        stats_message = (
+            f"📊 <b>Статистика отчетов пользователя</b>\n\n"
+            f"👤 {target_user_name} (@{target_username})\n"
+            f"✅ Принятых: {user_stats['accepted']}\n"
+            f"❌ Отклоненных: {user_stats['rejected']}\n"
+            f"📝 Всего: {user_stats['accepted'] + user_stats['rejected']}\n\n"
+            f"🔍 Запросил: {user.mention_html()}"
+        )
+
+    stats_msg = await message.reply_text(stats_message, parse_mode='HTML')
+
+    # Удаляем сообщения через минуту
+    asyncio.create_task(
+        delete_messages_after_delay(
+            context,
+            message.chat.id,
+            [message.message_id, stats_msg.message_id],
+            DELETE_AFTER_SECONDS
+        )
     )
 
-    await update.message.reply_text(stats_message, parse_mode='HTML')
+    logger.info(f"Stats viewed: {target_username} by {user.username}")
 
 async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /vg - выдать выговор"""
@@ -375,7 +524,6 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target_username = None
     reason = None
 
-    # Через реплай
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
         target_user_id = target_user.id
@@ -389,7 +537,6 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         reason = parts[1]
 
-    # Через упоминание
     elif message.entities:
         for entity in message.entities:
             if entity.type == "text_mention":
@@ -424,7 +571,6 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 target_user_id = None
                 break
 
-    # Текстовый формат
     else:
         text = message.text.strip()
         parts = text.split(maxsplit=2)
@@ -517,14 +663,12 @@ async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_T
     target_user_name = None
     target_username = None
 
-    # Через реплай (рекомендуется)
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
         target_user_id = target_user.id
         target_user_name = target_user.full_name
         target_username = target_user.username or str(target_user_id)
 
-    # Через упоминание
     elif message.entities:
         for entity in message.entities:
             if entity.type == "text_mention":
@@ -545,7 +689,6 @@ async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_T
                 target_user_id = None
                 break
 
-    # Текстовый формат
     else:
         text = message.text.strip()
         parts = text.split(maxsplit=1)
@@ -570,7 +713,6 @@ async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_T
     if target_user_id is None:
         target_user_id = f"username_{target_username}"
 
-    # Снимаем выговор
     new_count = remove_warning(target_user_id, issuer.username or issuer.full_name)
 
     if new_count is None:
@@ -582,7 +724,6 @@ async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_T
     else:
         user_link = f"@{target_username}"
 
-    # Сообщение в тему выговоров
     remove_message = (
         f"✅ <b>ВЫГОВОР СНЯТ</b>\n\n"
         f"👤 Пользователь: {user_link}\n"
@@ -651,7 +792,6 @@ async def handle_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    # Получаем проверяющих БЕЗ главного админа
     checkers = get_checkers_usernames(category)
     checker_mentions = ' '.join([f"@{username}" for username in checkers])
 
@@ -804,7 +944,7 @@ def main():
     ))
     application.add_handler(CallbackQueryHandler(handle_button_callback))
 
-    logger.info("Бот запущен с поддержкой главного админа и снятия выговоров!")
+    logger.info("Бот запущен с улучшенной системой /stats!")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':

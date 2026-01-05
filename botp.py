@@ -56,6 +56,9 @@ class Role(IntEnum):
 
 # Список пользователей с их ролями (username: роль)
 USERS_ROLES = {
+    # ГЛАВНЫЙ АДМИН (не упоминается в отчетах, но может проверять)
+    'zzzzzzzetv': Role.ГЛАВНЫЙ_АДМИН,  # УКАЖИТЕ USERNAME ГЛАВНОГО АДМИНА
+
     # Проверяющие всех (не сдают отчеты)
     'the_pr1estesss': Role.ЗАМ_ГЛАВНОГО,
     'qwertyuiopasdfghjklzxcvbnm123411': Role.СТАРШИЙ_АДМИН,
@@ -202,7 +205,27 @@ def add_warning(user_id: int, user_name: str, username: str, reason: str, issued
     warnings[user_key]['history'].append({
         'reason': reason,
         'issued_by': issued_by,
-        'timestamp': str(asyncio.get_event_loop().time())
+        'timestamp': str(asyncio.get_event_loop().time()),
+        'action': 'added'
+    })
+
+    save_warnings(warnings)
+    return warnings[user_key]['count']
+
+def remove_warning(user_id: int, removed_by: str):
+    """Снять выговор с пользователя"""
+    warnings = load_warnings()
+    user_key = str(user_id)
+
+    if user_key not in warnings or warnings[user_key]['count'] == 0:
+        return None  # Нет выговоров для снятия
+
+    warnings[user_key]['count'] -= 1
+    warnings[user_key]['history'].append({
+        'reason': 'Выговор снят',
+        'issued_by': removed_by,
+        'timestamp': str(asyncio.get_event_loop().time()),
+        'action': 'removed'
     })
 
     save_warnings(warnings)
@@ -235,6 +258,7 @@ def can_check_report(checker_role: Role, report_type: str) -> bool:
     if checker_role is None:
         return False
 
+    # Главный админ может проверять всё, но не упоминается
     if checker_role >= Role.СТАРШИЙ_АДМИН:
         return True
 
@@ -245,6 +269,12 @@ def can_check_report(checker_role: Role, report_type: str) -> bool:
 
 def can_issue_warning(user_role: Role) -> bool:
     """Проверка прав на выдачу выговоров (СЗМ и выше)"""
+    if user_role is None:
+        return False
+    return user_role >= Role.СЗМ
+
+def can_remove_warning(user_role: Role) -> bool:
+    """Проверка прав на снятие выговоров (СЗМ и выше)"""
     if user_role is None:
         return False
     return user_role >= Role.СЗМ
@@ -279,13 +309,15 @@ def get_topic_ids_for_category(category: str) -> dict:
     return None
 
 def get_checkers_usernames(category: str) -> list:
-    """Получить список юзернеймов проверяющих для категории"""
+    """Получить список юзернеймов проверяющих для категории (БЕЗ главного админа)"""
     if category == 'moderator':
+        # Проверяют: Зам, Старший админ, СЗМ, Админы (БЕЗ главного админа)
         return [username for username, role in USERS_ROLES.items() 
-                if role >= Role.АДМИН and username]
+                if Role.АДМИН <= role < Role.ГЛАВНЫЙ_АДМИН and username]
     elif category == 'admin':
+        # Проверяют: только Зам, Старший админ (БЕЗ главного админа)
         return [username for username, role in USERS_ROLES.items() 
-                if role >= Role.СТАРШИЙ_АДМИН and username]
+                if Role.СТАРШИЙ_АДМИН <= role < Role.ГЛАВНЫЙ_АДМИН and username]
     return []
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -301,7 +333,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Мл.админы, админы, СЗМ → Отчетность администрации\n\n"
         "⚠️ Команды:\n"
         "/stats - статистика отчетов\n"
-        "/vg - выдать выговор (ответьте на сообщение пользователя с причиной)"
+        "/vg - выдать выговор (ответ на сообщение + причина)\n"
+        "/svg - снять выговор (ответ на сообщение)"
     )
 
     await update.message.reply_text(message_text)
@@ -322,15 +355,13 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(stats_message, parse_mode='HTML')
 
 async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /vg - выдать выговор (через реплай или текстовое упоминание)"""
+    """Команда /vg - выдать выговор"""
     message = update.message
 
-    # Проверка что команда из группы
     if message.chat.id != GROUP_CHAT_ID:
         await message.reply_text("❌ Команда работает только в группе!")
         return
 
-    # Проверка прав
     issuer = message.from_user
     issuer_role = get_user_role(issuer.username)
 
@@ -344,14 +375,13 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target_username = None
     reason = None
 
-    # СПОСОБ 1: Через реплай (ответ на сообщение)
+    # Через реплай
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
         target_user_id = target_user.id
         target_user_name = target_user.full_name
         target_username = target_user.username or str(target_user_id)
 
-        # Причина - это текст команды после /vg
         text = message.text.strip()
         parts = text.split(maxsplit=1)
         if len(parts) < 2:
@@ -359,18 +389,15 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         reason = parts[1]
 
-    # СПОСОБ 2: Через текстовое упоминание (@username)
+    # Через упоминание
     elif message.entities:
-        # Ищем первое упоминание пользователя
         for entity in message.entities:
             if entity.type == "text_mention":
-                # Прямое упоминание (клик по имени)
                 target_user = entity.user
                 target_user_id = target_user.id
                 target_user_name = target_user.full_name
                 target_username = target_user.username or str(target_user_id)
 
-                # Получаем причину (весь текст после упоминания)
                 text = message.text
                 mention_end = entity.offset + entity.length
                 reason = text[mention_end:].strip()
@@ -381,7 +408,6 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 break
 
             elif entity.type == "mention":
-                # Упоминание через @username
                 text = message.text
                 username_start = entity.offset
                 username_end = entity.offset + entity.length
@@ -393,13 +419,12 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await message.reply_text("❌ Укажите причину выговора!")
                     return
 
-                # Записываем как есть, без ID (будет работать упрощенно)
                 target_username = mentioned_username
                 target_user_name = f"@{mentioned_username}"
-                target_user_id = None  # Будет упрощенный режим
+                target_user_id = None
                 break
 
-    # СПОСОБ 3: Текстовый формат /vg @username причина
+    # Текстовый формат
     else:
         text = message.text.strip()
         parts = text.split(maxsplit=2)
@@ -409,17 +434,15 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "❌ Неправильный формат!\n\n"
                 "Используйте один из способов:\n"
                 "1. Ответьте на сообщение: /vg причина\n"
-                "2. Упомяните: /vg @username причина\n"
-                "3. Кликните по имени и напишите: @Имя причина"
+                "2. Упомяните: /vg @username причина"
             )
             return
 
         target_username = parts[1].lstrip('@')
         reason = parts[2]
         target_user_name = f"@{target_username}"
-        target_user_id = None  # Упрощенный режим
+        target_user_id = None
 
-    # Если не удалось определить пользователя
     if not target_username and not target_user_id:
         await message.reply_text(
             "❌ Не удалось определить пользователя!\n\n"
@@ -427,12 +450,10 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Для упрощенного режима (без user_id) используем username как ключ
     if target_user_id is None:
         target_user_id = f"username_{target_username}"
         logger.info(f"Using simplified mode for {target_username}")
 
-    # Добавляем выговор
     warning_count = add_warning(
         target_user_id,
         target_user_name,
@@ -441,7 +462,6 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         issuer.username or issuer.full_name
     )
 
-    # Формируем сообщение о выговоре
     warning_emoji = "⚠️" if warning_count < MAX_WARNINGS else "🚫"
 
     if isinstance(target_user_id, int):
@@ -466,7 +486,6 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"@{DEPUTY_ADMIN_USERNAME} требуется исключение из группы!"
         )
 
-    # Отправляем в тему выговоров
     await context.bot.send_message(
         chat_id=GROUP_CHAT_ID,
         message_thread_id=WARNINGS_TOPIC_ID,
@@ -474,10 +493,114 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='HTML'
     )
 
-    # Подтверждение
     await message.reply_text(f"✅ Выговор #{warning_count} выдан {user_link}", parse_mode='HTML')
 
-    logger.info(f"Warning issued: {target_username} by {issuer.username}, count: {warning_count}, reason: {reason}")
+    logger.info(f"Warning issued: {target_username} by {issuer.username}, count: {warning_count}")
+
+async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /svg - снять выговор"""
+    message = update.message
+
+    if message.chat.id != GROUP_CHAT_ID:
+        await message.reply_text("❌ Команда работает только в группе!")
+        return
+
+    issuer = message.from_user
+    issuer_role = get_user_role(issuer.username)
+
+    if not can_remove_warning(issuer_role):
+        await message.reply_text("❌ У вас нет прав на снятие выговоров! (требуется СЗМ или выше)")
+        return
+
+    target_user = None
+    target_user_id = None
+    target_user_name = None
+    target_username = None
+
+    # Через реплай (рекомендуется)
+    if message.reply_to_message:
+        target_user = message.reply_to_message.from_user
+        target_user_id = target_user.id
+        target_user_name = target_user.full_name
+        target_username = target_user.username or str(target_user_id)
+
+    # Через упоминание
+    elif message.entities:
+        for entity in message.entities:
+            if entity.type == "text_mention":
+                target_user = entity.user
+                target_user_id = target_user.id
+                target_user_name = target_user.full_name
+                target_username = target_user.username or str(target_user_id)
+                break
+
+            elif entity.type == "mention":
+                text = message.text
+                username_start = entity.offset
+                username_end = entity.offset + entity.length
+                mentioned_username = text[username_start:username_end].lstrip('@')
+
+                target_username = mentioned_username
+                target_user_name = f"@{mentioned_username}"
+                target_user_id = None
+                break
+
+    # Текстовый формат
+    else:
+        text = message.text.strip()
+        parts = text.split(maxsplit=1)
+
+        if len(parts) < 2:
+            await message.reply_text(
+                "❌ Неправильный формат!\n\n"
+                "Используйте:\n"
+                "1. Ответьте на сообщение: /svg\n"
+                "2. Упомяните: /svg @username"
+            )
+            return
+
+        target_username = parts[1].lstrip('@')
+        target_user_name = f"@{target_username}"
+        target_user_id = None
+
+    if not target_username and not target_user_id:
+        await message.reply_text("❌ Не удалось определить пользователя!")
+        return
+
+    if target_user_id is None:
+        target_user_id = f"username_{target_username}"
+
+    # Снимаем выговор
+    new_count = remove_warning(target_user_id, issuer.username or issuer.full_name)
+
+    if new_count is None:
+        await message.reply_text(f"❌ У пользователя @{target_username} нет выговоров для снятия!")
+        return
+
+    if isinstance(target_user_id, int):
+        user_link = f"<a href='tg://user?id={target_user_id}'>{target_user_name}</a>"
+    else:
+        user_link = f"@{target_username}"
+
+    # Сообщение в тему выговоров
+    remove_message = (
+        f"✅ <b>ВЫГОВОР СНЯТ</b>\n\n"
+        f"👤 Пользователь: {user_link}\n"
+        f"📊 Текущее количество выговоров: {new_count}/{MAX_WARNINGS}\n"
+        f"👨‍💼 Снял: {issuer.mention_html()} (@{issuer.username})\n"
+        f"🎖 Роль: {issuer_role.name}"
+    )
+
+    await context.bot.send_message(
+        chat_id=GROUP_CHAT_ID,
+        message_thread_id=WARNINGS_TOPIC_ID,
+        text=remove_message,
+        parse_mode='HTML'
+    )
+
+    await message.reply_text(f"✅ Выговор снят! Осталось: {new_count}/{MAX_WARNINGS}", parse_mode='HTML')
+
+    logger.info(f"Warning removed: {target_username} by {issuer.username}, new count: {new_count}")
 
 async def handle_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка отчета"""
@@ -528,6 +651,7 @@ async def handle_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
+    # Получаем проверяющих БЕЗ главного админа
     checkers = get_checkers_usernames(category)
     checker_mentions = ' '.join([f"@{username}" for username in checkers])
 
@@ -673,13 +797,14 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("vg", warning_command))
+    application.add_handler(CommandHandler("svg", remove_warning_command))
     application.add_handler(MessageHandler(
         filters.PHOTO & filters.ChatType.SUPERGROUP, 
         handle_report
     ))
     application.add_handler(CallbackQueryHandler(handle_button_callback))
 
-    logger.info("Бот запущен с Railway Volume и постоянным хранилищем!")
+    logger.info("Бот запущен с поддержкой главного админа и снятия выговоров!")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':

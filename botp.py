@@ -23,9 +23,15 @@ ACCEPTED_ADMIN_TOPIC_ID = 17854  # Принятые отчеты админов
 REJECTED_ADMIN_TOPIC_ID = 17856  # Отклоненные отчеты админов
 WARNINGS_TOPIC_ID = 2976  # УКАЖИТЕ ID темы для выговоров
 
-# Файл для хранения статистики
-STATS_FILE = 'report_stats.json'
-WARNINGS_FILE = 'warnings_data.json'
+# Путь для постоянного хранилища (Railway Volume)
+DATA_DIR = '/app/data'
+
+# Создаем директорию если её нет (для локального тестирования)
+os.makedirs(DATA_DIR, exist_ok=True)
+
+# Файлы для хранения данных (в Volume)
+STATS_FILE = os.path.join(DATA_DIR, 'report_stats.json')
+WARNINGS_FILE = os.path.join(DATA_DIR, 'warnings_data.json')
 
 # Время до удаления сообщений (в секундах)
 DELETE_AFTER_SECONDS = 60  # 1 минута
@@ -34,7 +40,7 @@ DELETE_AFTER_SECONDS = 60  # 1 минута
 MAX_WARNINGS = 3
 
 # Username зама главного админа для оповещений
-DEPUTY_ADMIN_USERNAME = 'the_pr1estesss'  # Укажите username зама
+DEPUTY_ADMIN_USERNAME = 'the_pr1estesss'
 
 # Иерархия ролей
 class Role(IntEnum):
@@ -100,6 +106,7 @@ def save_stats(stats):
     try:
         with open(STATS_FILE, 'w', encoding='utf-8') as f:
             json.dump(stats, f, ensure_ascii=False, indent=2)
+        logger.info(f"Stats saved to {STATS_FILE}")
     except Exception as e:
         logger.error(f"Ошибка сохранения статистики: {e}")
 
@@ -157,6 +164,7 @@ def save_warnings(warnings):
     try:
         with open(WARNINGS_FILE, 'w', encoding='utf-8') as f:
             json.dump(warnings, f, ensure_ascii=False, indent=2)
+        logger.info(f"Warnings saved to {WARNINGS_FILE}")
     except Exception as e:
         logger.error(f"Ошибка сохранения выговоров: {e}")
 
@@ -379,8 +387,6 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 username_end = entity.offset + entity.length
                 mentioned_username = text[username_start:username_end].lstrip('@')
 
-                # Пытаемся получить ID из сообщения (если пользователь писал в группе)
-                # Для этого используем entities из сообщения
                 reason = text[username_end:].strip()
 
                 if not reason:
@@ -658,6 +664,10 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
 
 def main():
     """Запуск бота"""
+    logger.info(f"Starting bot with data directory: {DATA_DIR}")
+    logger.info(f"Stats file: {STATS_FILE}")
+    logger.info(f"Warnings file: {WARNINGS_FILE}")
+
     application = Application.builder().token(BOT_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
@@ -669,7 +679,7 @@ def main():
     ))
     application.add_handler(CallbackQueryHandler(handle_button_callback))
 
-    logger.info("Бот запущен с улучшенной системой выговоров!")
+    logger.info("Бот запущен с Railway Volume и постоянным хранилищем!")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':

@@ -80,9 +80,11 @@ USERS_ROLES = {
     'anayka_lol': Role.МЛ_АДМИН,
     'ml_admin2': Role.МЛ_АДМИН,
 
-    # Сдают отчеты в модерацию
+    # Старшие модераторы
     'matnozdra': Role.СТАРШИЙ_МОДЕРАТОР,
     'st_moder2': Role.СТАРШИЙ_МОДЕРАТОР,
+
+    # Модераторы (из вашего списка)
     'breakbrosmiling': Role.МОДЕРАТОР,
     'bosspogranki': Role.МОДЕРАТОР,
     'spearskill': Role.МОДЕРАТОР,
@@ -92,7 +94,6 @@ USERS_ROLES = {
     'sportaisam': Role.МОДЕРАТОР,
     'rusich_group35': Role.МОДЕРАТОР,
     'za_spartakmsk': Role.МОДЕРАТОР,
-    'moder2': Role.МОДЕРАТОР,
 }
 
 # Словарь для хранения информации об отчетах
@@ -263,13 +264,25 @@ async def delete_messages_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_i
             logger.error(f"Failed to delete message {msg_id}: {e}")
 
 def get_user_role(username: str) -> Role:
-    """Получить роль пользователя по username"""
+    """Получить роль пользователя по username - С ДЕТАЛЬНЫМ DEBUG ЛОГИРОВАНИЕМ"""
+    logger.info("🔍 DEBUG get_user_role():")
+    logger.info(f"   Входной username: '{username}' (type: {type(username).__name__})")
+
     if not username:
-        logger.warning("Username is None or empty")
+        logger.warning("   ⚠️ Username is None or empty - вернется None")
         return None
+
     clean_username = username.lstrip('@').lower()
-    logger.info(f"Checking role for username: {clean_username}")
-    return USERS_ROLES.get(clean_username)
+    logger.info(f"   После .lstrip('@').lower(): '{clean_username}'")
+
+    role = USERS_ROLES.get(clean_username)
+    logger.info(f"   Результат поиска в USERS_ROLES: {role.name if role else 'None'}")
+
+    if not role:
+        logger.warning(f"   ❌ Username '{clean_username}' НЕ НАЙДЕН в USERS_ROLES!")
+        logger.info(f"   📋 Доступные ключи: {list(USERS_ROLES.keys())}")
+
+    return role
 
 def can_check_report(checker_role: Role, report_type: str) -> bool:
     """Проверка прав на проверку отчетов"""
@@ -379,7 +392,6 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"⏳ Подождите {cooldown_left} секунд перед следующим использованием /stats"
             )
 
-            # Удаляем сообщения через минуту
             asyncio.create_task(
                 delete_messages_after_delay(
                     context,
@@ -390,7 +402,6 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-    # Обновляем время последнего использования
     stats_cooldowns[user_key] = current_time
 
     # Определяем чью статистику показывать
@@ -398,12 +409,10 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target_user_name = None
     target_username = None
 
-    # Проверяем есть ли аргументы команды
     text = message.text.strip()
     parts = text.split(maxsplit=1)
 
     if len(parts) > 1:
-        # Запрос статистики другого пользователя
         if not can_view_others_stats(user_role):
             error_msg = await message.reply_text(
                 "❌ У вас нет прав для просмотра чужой статистики! (требуется СЗМ или выше)"
@@ -418,17 +427,14 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # Парсим username или mention
         target_input = parts[1].lstrip('@')
 
-        # Пытаемся найти через reply
         if message.reply_to_message:
             target_user = message.reply_to_message.from_user
             target_user_id = target_user.id
             target_user_name = target_user.full_name
             target_username = target_user.username or str(target_user_id)
 
-        # Через entities (mention)
         elif message.entities:
             for entity in message.entities:
                 if entity.type == "text_mention":
@@ -438,16 +444,13 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     target_username = target_user.username or str(target_user_id)
                     break
 
-        # Через текстовый username
         if target_user_id is None:
             target_username = target_input
-            # Ищем в сохраненной статистике
             found_id, found_data = get_user_stats_by_username(target_username)
             if found_id:
                 target_user_id = int(found_id)
                 target_user_name = found_data.get('name', f'@{target_username}')
             else:
-                # Пользователь не найден
                 error_msg = await message.reply_text(
                     f"❌ Пользователь @{target_username} не найден в статистике!\n"
                     f"Возможно, он еще не сдавал отчеты."
@@ -462,15 +465,12 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
     else:
-        # Показываем свою статистику
         target_user_id = user.id
         target_user_name = user.full_name
         target_username = user.username
 
-    # Получаем статистику
     user_stats = get_user_stats(target_user_id)
 
-    # Формируем сообщение
     if target_user_id == user.id:
         stats_message = (
             f"📊 <b>Ваша статистика отчетов</b>\n\n"
@@ -491,7 +491,6 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     stats_msg = await message.reply_text(stats_message, parse_mode='HTML')
 
-    # Удаляем сообщения через минуту
     asyncio.create_task(
         delete_messages_after_delay(
             context,
@@ -744,7 +743,7 @@ async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_T
     logger.info(f"Warning removed: {target_username} by {issuer.username}, new count: {new_count}")
 
 async def handle_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка отчета"""
+    """Обработка отчета - С ДЕТАЛЬНЫМ DEBUG ЛОГИРОВАНИЕМ"""
     message = update.message
 
     if message.chat.id != GROUP_CHAT_ID:
@@ -766,9 +765,26 @@ async def handle_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     sender = message.from_user
-    logger.info(f"Report from: {sender.username} (ID: {sender.id})")
 
+    # ===== ДЕТАЛЬНОЕ DEBUG ЛОГИРОВАНИЕ =====
+    logger.info("=" * 80)
+    logger.info("📋 НОВЫЙ ОТЧЕТ - ПОЛНАЯ ДИАГНОСТИКА:")
+    logger.info(f"   User ID: {sender.id}")
+    logger.info(f"   Username (raw): '{sender.username}'")
+    logger.info(f"   First name: '{sender.first_name}'")
+    logger.info(f"   Last name: '{sender.last_name}'")
+    logger.info(f"   Full name: '{sender.full_name}'")
+    logger.info(f"   Is bot: {sender.is_bot}")
+    logger.info(f"   Category: {category}")
+    logger.info("---")
+
+    # Вызываем get_user_role (она сама логирует детали)
     sender_role = get_user_role(sender.username)
+
+    logger.info(f"🎯 ИТОГОВАЯ РОЛЬ: {sender_role.name if sender_role else 'None (будет отображаться Неизвестна)'}")
+    logger.info("=" * 80)
+    # ===== КОНЕЦ DEBUG ЛОГИРОВАНИЯ =====
+
     expected_category = get_report_category(sender_role)
 
     logger.info(f"Sender role: {sender_role}, Expected category: {expected_category}, Actual category: {category}")
@@ -928,9 +944,15 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
 
 def main():
     """Запуск бота"""
-    logger.info(f"Starting bot with data directory: {DATA_DIR}")
-    logger.info(f"Stats file: {STATS_FILE}")
-    logger.info(f"Warnings file: {WARNINGS_FILE}")
+    logger.info("🚀 ===== ЗАПУСК ПОЛНОЙ DEBUG ВЕРСИИ БОТА =====")
+    logger.info(f"📁 Data directory: {DATA_DIR}")
+    logger.info(f"📊 Stats file: {STATS_FILE}")
+    logger.info(f"⚠️ Warnings file: {WARNINGS_FILE}")
+    logger.info(f"👥 Загружено пользователей с ролями: {len(USERS_ROLES)}")
+    logger.info(f"📋 Список ролей:")
+    for username, role in USERS_ROLES.items():
+        logger.info(f"   • {username}: {role.name}")
+    logger.info("=" * 80)
 
     application = Application.builder().token(BOT_TOKEN).build()
 
@@ -944,7 +966,7 @@ def main():
     ))
     application.add_handler(CallbackQueryHandler(handle_button_callback))
 
-    logger.info("Бот запущен с улучшенной системой /stats!")
+    logger.info("✅ Бот запущен с ПОЛНЫМ ФУНКЦИОНАЛОМ + DEBUG ЛОГИРОВАНИЕМ!")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':

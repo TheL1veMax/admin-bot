@@ -508,8 +508,8 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if found_id is not None:
                 target_user_id = found_id
-                target_user_name = found_name
-                logger.info(f"✅ In DB: ID={target_user_id}")
+                target_user_name = found_name if found_name else f"@{target_username}"
+                logger.info(f"✅ In DB: ID={target_user_id}, Name={target_user_name}")
             else:
                 logger.error(f"❌ @{target_username} NOT FOUND!")
                 error_msg = await message.reply_text(
@@ -519,11 +519,15 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
                 return
 
-    if target_user_id is None or target_user_name is None:
-        logger.error(f"❌ CRITICAL: ID={target_user_id}, Name={target_user_name}")
+    if target_user_id is None:
+        logger.error(f"❌ CRITICAL: target_user_id is None!")
         error_msg = await message.reply_text("❌ Ошибка определения пользователя!")
         asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
         return
+
+    if not target_user_name or target_user_name == "None":
+        target_user_name = f"@{target_username}"
+        logger.warning(f"⚠️ Using username as fallback: {target_user_name}")
 
     warning_count = add_warning(target_user_id, target_user_name, target_username, reason, issuer.username or issuer.full_name)
 
@@ -610,7 +614,7 @@ async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_T
             found_id, found_name = find_user_id_by_username(target_username)
             if found_id is not None:
                 target_user_id = found_id
-                target_user_name = found_name
+                target_user_name = found_name if found_name else f"@{target_username}"
             else:
                 error_msg = await message.reply_text(f"❌ @{target_username} не найден!")
                 asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
@@ -620,6 +624,9 @@ async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_T
         error_msg = await message.reply_text("❌ Ошибка!")
         asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
         return
+
+    if not target_user_name or target_user_name == "None":
+        target_user_name = f"@{target_username}"
 
     new_count = remove_warning(target_user_id, issuer.username or issuer.full_name)
 
@@ -727,7 +734,7 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             found_id, found_name = find_user_id_by_username(target_username)
             if found_id is not None:
                 target_user_id = found_id
-                target_user_name = found_name
+                target_user_name = found_name if found_name else f"@{target_username}"
             else:
                 error_msg = await message.reply_text(f"❌ @{target_username} не найден!")
                 asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
@@ -737,6 +744,9 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         error_msg = await message.reply_text("❌ Ошибка!")
         asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
         return
+
+    if not target_user_name or target_user_name == "None":
+        target_user_name = f"@{target_username}"
 
     entry = add_to_blacklist(target_user_id, target_user_name, target_username, days, reason, issuer.username or issuer.full_name)
 
@@ -815,7 +825,7 @@ async def unblacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE
             found_id, found_name = find_user_id_by_username(target_username)
             if found_id is not None:
                 target_user_id = found_id
-                target_user_name = found_name
+                target_user_name = found_name if found_name else f"@{target_username}"
             else:
                 error_msg = await message.reply_text(f"❌ @{target_username} не найден!")
                 asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
@@ -825,6 +835,9 @@ async def unblacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         error_msg = await message.reply_text("❌ Ошибка!")
         asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
         return
+
+    if not target_user_name or target_user_name == "None":
+        target_user_name = f"@{target_username}"
 
     removed = remove_from_blacklist(target_user_id)
 
@@ -895,7 +908,7 @@ async def reset_accepted_command(update: Update, context: ContextTypes.DEFAULT_T
             found_id, found_name = find_user_id_by_username(target_username)
             if found_id is not None:
                 target_user_id = found_id
-                target_user_name = found_name
+                target_user_name = found_name if found_name else f"@{target_username}"
             else:
                 stats = load_stats()
                 for uid, data in stats.items():
@@ -913,6 +926,9 @@ async def reset_accepted_command(update: Update, context: ContextTypes.DEFAULT_T
         error_msg = await message.reply_text("❌ Ошибка!")
         asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
         return
+
+    if not target_user_name or target_user_name == "None":
+        target_user_name = f"@{target_username}"
 
     stats = load_stats()
     user_key = str(target_user_id)
@@ -979,7 +995,7 @@ async def reset_rejected_command(update: Update, context: ContextTypes.DEFAULT_T
             found_id, found_name = find_user_id_by_username(target_username)
             if found_id is not None:
                 target_user_id = found_id
-                target_user_name = found_name
+                target_user_name = found_name if found_name else f"@{target_username}"
             else:
                 stats = load_stats()
                 for uid, data in stats.items():
@@ -997,6 +1013,9 @@ async def reset_rejected_command(update: Update, context: ContextTypes.DEFAULT_T
         error_msg = await message.reply_text("❌ Ошибка!")
         asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
         return
+
+    if not target_user_name or target_user_name == "None":
+        target_user_name = f"@{target_username}"
 
     stats = load_stats()
     user_key = str(target_user_id)
@@ -1153,8 +1172,8 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
     del reports_data[report_key]
 
 def main():
-    logger.info("🚀 Запуск бота - ОКОНЧАТЕЛЬНАЯ РАБОЧАЯ ВЕРСИЯ")
-    logger.info("✅ ВСЕ БАГИ ИСПРАВЛЕНЫ")
+    logger.info("🚀 Запуск бота - ФИНАЛЬНАЯ ВЕРСИЯ")
+    logger.info("✅ Проблема 'Group' исправлена - username как fallback")
     logger.info(f"👥 Пользователей: {len(USERS_ROLES)}")
 
     application = Application.builder().token(BOT_TOKEN).build()

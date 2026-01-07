@@ -29,6 +29,7 @@ os.makedirs(DATA_DIR, exist_ok=True)
 STATS_FILE = os.path.join(DATA_DIR, 'report_stats.json')
 WARNINGS_FILE = os.path.join(DATA_DIR, 'warnings_data.json')
 BLACKLIST_FILE = os.path.join(DATA_DIR, 'blacklist_data.json')
+USER_IDS_FILE = os.path.join(DATA_DIR, 'user_ids.json')
 
 DELETE_AFTER_SECONDS = 60
 STATS_COOLDOWN = 10
@@ -72,6 +73,46 @@ USERS_ROLES['rusich_group35'] = Role.МОДЕРАТОР
 USERS_ROLES['za_spartakmsk'] = Role.МОДЕРАТОР
 
 reports_data = {}
+
+def load_user_ids():
+    """Загрузка базы username -> user_id"""
+    if os.path.exists(USER_IDS_FILE):
+        try:
+            with open(USER_IDS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"Ошибка загрузки user_ids: {e}")
+    return {}
+
+def save_user_ids(user_ids):
+    """Сохранение базы username -> user_id"""
+    try:
+        with open(USER_IDS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(user_ids, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Ошибка сохранения user_ids: {e}")
+
+def register_user(user_id: int, username: str, full_name: str):
+    """Регистрация пользователя в базе"""
+    if not username:
+        return
+    user_ids = load_user_ids()
+    clean_username = username.lower()
+    user_ids[clean_username] = {
+        'user_id': user_id,
+        'username': username,
+        'full_name': full_name,
+        'last_seen': str(time.time())
+    }
+    save_user_ids(user_ids)
+
+def find_user_id_by_username(username: str):
+    """Поиск user_id по username"""
+    user_ids = load_user_ids()
+    clean_username = username.lower()
+    if clean_username in user_ids:
+        return user_ids[clean_username]['user_id'], user_ids[clean_username]['full_name']
+    return None, None
 
 def load_stats():
     if os.path.exists(STATS_FILE):
@@ -117,9 +158,7 @@ def update_user_stats(user_id: int, user_name: str, action: str):
     return stats[user_key]
 
 def reset_user_stats(user_id: int, stat_type: str):
-    """Сброс статистики пользователя
-    stat_type: 'accepted' или 'rejected'
-    """
+    """Сброс статистики пользователя"""
     stats = load_stats()
     user_key = str(user_id)
 
@@ -290,7 +329,6 @@ def can_view_others_stats(user_role: Role) -> bool:
     return user_role is not None and user_role >= Role.СЗМ
 
 def can_reset_stats(user_role: Role) -> bool:
-    """Проверка прав на сброс статистики (СЗМ+)"""
     return user_role is not None and user_role >= Role.СЗМ
 
 def get_report_category(user_role: Role) -> str:
@@ -329,7 +367,10 @@ def get_checkers_usernames(category: str) -> list:
     return []
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_role = get_user_role(update.message.from_user.username)
+    user = update.message.from_user
+    register_user(user.id, user.username, user.full_name)
+
+    user_role = get_user_role(user.username)
     role_name = user_role.name if user_role else "Не назначена"
     message_text = (
         "✅ Бот для проверки отчетов модерации запущен!\n\n"
@@ -353,6 +394,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
     user = message.from_user
+    register_user(user.id, user.username, user.full_name)
+
     user_role = get_user_role(user.username)
 
     current_time = time.time()
@@ -398,6 +441,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             target_user_id = target_user.id
             target_user_name = target_user.full_name
             target_username = target_user.username or str(target_user_id)
+            register_user(target_user_id, target_user.username, target_user_name)
         elif message.entities:
             for entity in message.entities:
                 if entity.type == "text_mention":
@@ -405,6 +449,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     target_user_id = target_user.id
                     target_user_name = target_user.full_name
                     target_username = target_user.username or str(target_user_id)
+                    register_user(target_user_id, target_user.username, target_user_name)
                     break
 
         if target_user_id is None:
@@ -428,11 +473,14 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target_username = user.username
 
     user_stats = get_user_stats(target_user_id)
+    target_role = get_user_role(target_username)
+    role_name = target_role.name if target_role else "Не назначена"
 
     if target_user_id == user.id:
         stats_message = (
             f"📊 <b>Ваша статистика отчетов</b>\n\n"
             f"👤 {target_user_name}\n"
+            f"🎖 Ранг: {role_name}\n"
             f"✅ Принятых: {user_stats['accepted']}\n"
             f"❌ Отклоненных: {user_stats['rejected']}\n"
             f"📝 Всего: {user_stats['accepted'] + user_stats['rejected']}"
@@ -441,6 +489,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         stats_message = (
             f"📊 <b>Статистика отчетов пользователя</b>\n\n"
             f"👤 {target_user_name} (@{target_username})\n"
+            f"🎖 Ранг: {role_name}\n"
             f"✅ Принятых: {user_stats['accepted']}\n"
             f"❌ Отклоненных: {user_stats['rejected']}\n"
             f"📝 Всего: {user_stats['accepted'] + user_stats['rejected']}\n\n"
@@ -463,10 +512,16 @@ async def reset_accepted_command(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     issuer = message.from_user
+    register_user(issuer.id, issuer.username, issuer.full_name)
     issuer_role = get_user_role(issuer.username)
 
     if not can_reset_stats(issuer_role):
-        await message.reply_text("❌ У вас нет прав на сброс статистики! (требуется СЗМ+)")
+        error_msg = await message.reply_text("❌ У вас нет прав на сброс статистики! (требуется СЗМ+)")
+        asyncio.create_task(
+            delete_messages_after_delay(context, message.chat.id,
+                                      [message.message_id, error_msg.message_id],
+                                      DELETE_AFTER_SECONDS)
+        )
         return
 
     target_user_id = None
@@ -478,16 +533,22 @@ async def reset_accepted_command(update: Update, context: ContextTypes.DEFAULT_T
         target_user_id = target_user.id
         target_user_name = target_user.full_name
         target_username = target_user.username or str(target_user_id)
+        register_user(target_user_id, target_user.username, target_user_name)
     else:
         text = message.text.strip()
         parts = text.split(maxsplit=1)
 
         if len(parts) < 2:
-            await message.reply_text(
+            error_msg = await message.reply_text(
                 "❌ Неправильный формат!\n\n"
                 "Используйте:\n"
                 "1. Ответ на сообщение: /sp\n"
                 "2. Упоминание: /sp @username"
+            )
+            asyncio.create_task(
+                delete_messages_after_delay(context, message.chat.id,
+                                          [message.message_id, error_msg.message_id],
+                                          DELETE_AFTER_SECONDS)
             )
             return
 
@@ -500,21 +561,37 @@ async def reset_accepted_command(update: Update, context: ContextTypes.DEFAULT_T
                     target_user_id = target_user.id
                     target_user_name = target_user.full_name
                     target_username = target_user.username or str(target_user_id)
+                    register_user(target_user_id, target_user.username, target_user_name)
                     break
 
         if target_user_id is None:
-            found_id, found_data = get_user_stats_by_username(target_username)
-            if found_id:
-                target_user_id = int(found_id)
-                target_user_name = found_data.get('name', f'@{target_username}')
-            else:
-                await message.reply_text(f"❌ Пользователь @{target_username} не найден в статистике!")
-                return
+            target_user_id, target_user_name = find_user_id_by_username(target_username)
+            if target_user_id is None:
+                found_id, found_data = get_user_stats_by_username(target_username)
+                if found_id:
+                    target_user_id = int(found_id)
+                    target_user_name = found_data.get('name', f'@{target_username}')
+                else:
+                    error_msg = await message.reply_text(
+                        f"❌ Пользователь @{target_username} не найден!\n"
+                        f"💡 Попросите его написать /start боту"
+                    )
+                    asyncio.create_task(
+                        delete_messages_after_delay(context, message.chat.id,
+                                                  [message.message_id, error_msg.message_id],
+                                                  DELETE_AFTER_SECONDS)
+                    )
+                    return
 
     old_value = reset_user_stats(target_user_id, 'accepted')
 
     if old_value is None:
-        await message.reply_text(f"❌ Пользователь @{target_username} не найден в статистике!")
+        error_msg = await message.reply_text(f"❌ Пользователь @{target_username} не найден в статистике!")
+        asyncio.create_task(
+            delete_messages_after_delay(context, message.chat.id,
+                                      [message.message_id, error_msg.message_id],
+                                      DELETE_AFTER_SECONDS)
+        )
         return
 
     if isinstance(target_user_id, int):
@@ -522,13 +599,19 @@ async def reset_accepted_command(update: Update, context: ContextTypes.DEFAULT_T
     else:
         user_link = f"@{target_username}"
 
-    await message.reply_text(
+    success_msg = await message.reply_text(
         f"✅ <b>Принятые отчеты сброшены</b>\n\n"
         f"👤 Пользователь: {user_link}\n"
         f"📊 Было: {old_value} → Стало: 0\n"
         f"👨‍💼 Сбросил: {issuer.mention_html()}\n"
         f"🎖 Роль: {issuer_role.name}",
         parse_mode='HTML'
+    )
+
+    asyncio.create_task(
+        delete_messages_after_delay(context, message.chat.id,
+                                  [message.message_id, success_msg.message_id],
+                                  DELETE_AFTER_SECONDS)
     )
 
     logger.info(f"Reset accepted stats: {target_username} by {issuer.username}, was {old_value}")
@@ -542,10 +625,16 @@ async def reset_rejected_command(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     issuer = message.from_user
+    register_user(issuer.id, issuer.username, issuer.full_name)
     issuer_role = get_user_role(issuer.username)
 
     if not can_reset_stats(issuer_role):
-        await message.reply_text("❌ У вас нет прав на сброс статистики! (требуется СЗМ+)")
+        error_msg = await message.reply_text("❌ У вас нет прав на сброс статистики! (требуется СЗМ+)")
+        asyncio.create_task(
+            delete_messages_after_delay(context, message.chat.id,
+                                      [message.message_id, error_msg.message_id],
+                                      DELETE_AFTER_SECONDS)
+        )
         return
 
     target_user_id = None
@@ -557,16 +646,22 @@ async def reset_rejected_command(update: Update, context: ContextTypes.DEFAULT_T
         target_user_id = target_user.id
         target_user_name = target_user.full_name
         target_username = target_user.username or str(target_user_id)
+        register_user(target_user_id, target_user.username, target_user_name)
     else:
         text = message.text.strip()
         parts = text.split(maxsplit=1)
 
         if len(parts) < 2:
-            await message.reply_text(
+            error_msg = await message.reply_text(
                 "❌ Неправильный формат!\n\n"
                 "Используйте:\n"
                 "1. Ответ на сообщение: /so\n"
                 "2. Упоминание: /so @username"
+            )
+            asyncio.create_task(
+                delete_messages_after_delay(context, message.chat.id,
+                                          [message.message_id, error_msg.message_id],
+                                          DELETE_AFTER_SECONDS)
             )
             return
 
@@ -579,21 +674,37 @@ async def reset_rejected_command(update: Update, context: ContextTypes.DEFAULT_T
                     target_user_id = target_user.id
                     target_user_name = target_user.full_name
                     target_username = target_user.username or str(target_user_id)
+                    register_user(target_user_id, target_user.username, target_user_name)
                     break
 
         if target_user_id is None:
-            found_id, found_data = get_user_stats_by_username(target_username)
-            if found_id:
-                target_user_id = int(found_id)
-                target_user_name = found_data.get('name', f'@{target_username}')
-            else:
-                await message.reply_text(f"❌ Пользователь @{target_username} не найден в статистике!")
-                return
+            target_user_id, target_user_name = find_user_id_by_username(target_username)
+            if target_user_id is None:
+                found_id, found_data = get_user_stats_by_username(target_username)
+                if found_id:
+                    target_user_id = int(found_id)
+                    target_user_name = found_data.get('name', f'@{target_username}')
+                else:
+                    error_msg = await message.reply_text(
+                        f"❌ Пользователь @{target_username} не найден!\n"
+                        f"💡 Попросите его написать /start боту"
+                    )
+                    asyncio.create_task(
+                        delete_messages_after_delay(context, message.chat.id,
+                                                  [message.message_id, error_msg.message_id],
+                                                  DELETE_AFTER_SECONDS)
+                    )
+                    return
 
     old_value = reset_user_stats(target_user_id, 'rejected')
 
     if old_value is None:
-        await message.reply_text(f"❌ Пользователь @{target_username} не найден в статистике!")
+        error_msg = await message.reply_text(f"❌ Пользователь @{target_username} не найден в статистике!")
+        asyncio.create_task(
+            delete_messages_after_delay(context, message.chat.id,
+                                      [message.message_id, error_msg.message_id],
+                                      DELETE_AFTER_SECONDS)
+        )
         return
 
     if isinstance(target_user_id, int):
@@ -601,13 +712,19 @@ async def reset_rejected_command(update: Update, context: ContextTypes.DEFAULT_T
     else:
         user_link = f"@{target_username}"
 
-    await message.reply_text(
+    success_msg = await message.reply_text(
         f"✅ <b>Отклоненные отчеты сброшены</b>\n\n"
         f"👤 Пользователь: {user_link}\n"
         f"📊 Было: {old_value} → Стало: 0\n"
         f"👨‍💼 Сбросил: {issuer.mention_html()}\n"
         f"🎖 Роль: {issuer_role.name}",
         parse_mode='HTML'
+    )
+
+    asyncio.create_task(
+        delete_messages_after_delay(context, message.chat.id,
+                                  [message.message_id, success_msg.message_id],
+                                  DELETE_AFTER_SECONDS)
     )
 
     logger.info(f"Reset rejected stats: {target_username} by {issuer.username}, was {old_value}")
@@ -621,10 +738,16 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     issuer = message.from_user
+    register_user(issuer.id, issuer.username, issuer.full_name)
     issuer_role = get_user_role(issuer.username)
 
     if not can_issue_warning(issuer_role):
-        await message.reply_text("❌ У вас нет прав на выдачу выговоров! (требуется СЗМ+)")
+        error_msg = await message.reply_text("❌ У вас нет прав на выдачу выговоров! (требуется СЗМ+)")
+        asyncio.create_task(
+            delete_messages_after_delay(context, message.chat.id,
+                                      [message.message_id, error_msg.message_id],
+                                      DELETE_AFTER_SECONDS)
+        )
         return
 
     target_user_id = None
@@ -637,11 +760,17 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target_user_id = target_user.id
         target_user_name = target_user.full_name
         target_username = target_user.username or str(target_user_id)
+        register_user(target_user_id, target_user.username, target_user_name)
 
         text = message.text.strip()
         parts = text.split(maxsplit=1)
         if len(parts) < 2:
-            await message.reply_text("❌ Укажите причину выговора!\n\nПример: /vg Нарушение правил")
+            error_msg = await message.reply_text("❌ Укажите причину выговора!\n\nПример: /vg Нарушение правил")
+            asyncio.create_task(
+                delete_messages_after_delay(context, message.chat.id,
+                                          [message.message_id, error_msg.message_id],
+                                          DELETE_AFTER_SECONDS)
+            )
             return
         reason = parts[1]
     else:
@@ -649,11 +778,16 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parts = text.split(maxsplit=2)
 
         if len(parts) < 3:
-            await message.reply_text(
+            error_msg = await message.reply_text(
                 "❌ Неправильный формат!\n\n"
                 "Используйте:\n"
                 "1. Ответьте на сообщение: /vg причина\n"
                 "2. Упомяните: /vg @username причина"
+            )
+            asyncio.create_task(
+                delete_messages_after_delay(context, message.chat.id,
+                                          [message.message_id, error_msg.message_id],
+                                          DELETE_AFTER_SECONDS)
             )
             return
 
@@ -667,14 +801,30 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     target_user_id = target_user.id
                     target_user_name = target_user.full_name
                     target_username = target_user.username or str(target_user_id)
+                    register_user(target_user_id, target_user.username, target_user_name)
                     break
 
         if target_user_id is None:
-            target_user_name = f"@{target_username}"
-            target_user_id = f"username_{target_username}"
+            target_user_id, target_user_name = find_user_id_by_username(target_username)
+            if target_user_id is None:
+                error_msg = await message.reply_text(
+                    f"❌ Пользователь @{target_username} не найден!\n"
+                    f"💡 Попросите его написать /start боту или используйте ответ на сообщение"
+                )
+                asyncio.create_task(
+                    delete_messages_after_delay(context, message.chat.id,
+                                              [message.message_id, error_msg.message_id],
+                                              DELETE_AFTER_SECONDS)
+                )
+                return
 
     if not target_username and not target_user_id:
-        await message.reply_text("❌ Не удалось определить пользователя!")
+        error_msg = await message.reply_text("❌ Не удалось определить пользователя!")
+        asyncio.create_task(
+            delete_messages_after_delay(context, message.chat.id,
+                                      [message.message_id, error_msg.message_id],
+                                      DELETE_AFTER_SECONDS)
+        )
         return
 
     warning_count = add_warning(target_user_id, target_user_name, target_username, reason, 
@@ -711,7 +861,13 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='HTML'
     )
 
-    await message.reply_text(f"✅ Выговор #{warning_count} выдан {user_link}", parse_mode='HTML')
+    success_msg = await message.reply_text(f"✅ Выговор #{warning_count} выдан {user_link}", parse_mode='HTML')
+
+    asyncio.create_task(
+        delete_messages_after_delay(context, message.chat.id,
+                                  [message.message_id, success_msg.message_id],
+                                  DELETE_AFTER_SECONDS)
+    )
 
     logger.info(f"Warning issued: {target_username} by {issuer.username}, count: {warning_count}")
 
@@ -724,10 +880,16 @@ async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     issuer = message.from_user
+    register_user(issuer.id, issuer.username, issuer.full_name)
     issuer_role = get_user_role(issuer.username)
 
     if not can_remove_warning(issuer_role):
-        await message.reply_text("❌ У вас нет прав на снятие выговоров! (требуется СЗМ+)")
+        error_msg = await message.reply_text("❌ У вас нет прав на снятие выговоров! (требуется СЗМ+)")
+        asyncio.create_task(
+            delete_messages_after_delay(context, message.chat.id,
+                                      [message.message_id, error_msg.message_id],
+                                      DELETE_AFTER_SECONDS)
+        )
         return
 
     target_user_id = None
@@ -739,16 +901,22 @@ async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_T
         target_user_id = target_user.id
         target_user_name = target_user.full_name
         target_username = target_user.username or str(target_user_id)
+        register_user(target_user_id, target_user.username, target_user_name)
     else:
         text = message.text.strip()
         parts = text.split(maxsplit=1)
 
         if len(parts) < 2:
-            await message.reply_text(
+            error_msg = await message.reply_text(
                 "❌ Неправильный формат!\n\n"
                 "Используйте:\n"
                 "1. Ответьте на сообщение: /svg\n"
                 "2. Упомяните: /svg @username"
+            )
+            asyncio.create_task(
+                delete_messages_after_delay(context, message.chat.id,
+                                          [message.message_id, error_msg.message_id],
+                                          DELETE_AFTER_SECONDS)
             )
             return
 
@@ -761,20 +929,41 @@ async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_T
                     target_user_id = target_user.id
                     target_user_name = target_user.full_name
                     target_username = target_user.username or str(target_user_id)
+                    register_user(target_user_id, target_user.username, target_user_name)
                     break
 
         if target_user_id is None:
-            target_user_name = f"@{target_username}"
-            target_user_id = f"username_{target_username}"
+            target_user_id, target_user_name = find_user_id_by_username(target_username)
+            if target_user_id is None:
+                error_msg = await message.reply_text(
+                    f"❌ Пользователь @{target_username} не найден!\n"
+                    f"💡 Попросите его написать /start боту"
+                )
+                asyncio.create_task(
+                    delete_messages_after_delay(context, message.chat.id,
+                                              [message.message_id, error_msg.message_id],
+                                              DELETE_AFTER_SECONDS)
+                )
+                return
 
     if not target_username and not target_user_id:
-        await message.reply_text("❌ Не удалось определить пользователя!")
+        error_msg = await message.reply_text("❌ Не удалось определить пользователя!")
+        asyncio.create_task(
+            delete_messages_after_delay(context, message.chat.id,
+                                      [message.message_id, error_msg.message_id],
+                                      DELETE_AFTER_SECONDS)
+        )
         return
 
     new_count = remove_warning(target_user_id, issuer.username or issuer.full_name)
 
     if new_count is None:
-        await message.reply_text(f"❌ У пользователя @{target_username} нет выговоров для снятия!")
+        error_msg = await message.reply_text(f"❌ У пользователя @{target_username} нет выговоров для снятия!")
+        asyncio.create_task(
+            delete_messages_after_delay(context, message.chat.id,
+                                      [message.message_id, error_msg.message_id],
+                                      DELETE_AFTER_SECONDS)
+        )
         return
 
     if isinstance(target_user_id, int):
@@ -797,7 +986,13 @@ async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_T
         parse_mode='HTML'
     )
 
-    await message.reply_text(f"✅ Выговор снят! Осталось: {new_count}/{MAX_WARNINGS}", parse_mode='HTML')
+    success_msg = await message.reply_text(f"✅ Выговор снят! Осталось: {new_count}/{MAX_WARNINGS}", parse_mode='HTML')
+
+    asyncio.create_task(
+        delete_messages_after_delay(context, message.chat.id,
+                                  [message.message_id, success_msg.message_id],
+                                  DELETE_AFTER_SECONDS)
+    )
 
     logger.info(f"Warning removed: {target_username} by {issuer.username}, new count: {new_count}")
 
@@ -810,10 +1005,16 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     issuer = message.from_user
+    register_user(issuer.id, issuer.username, issuer.full_name)
     issuer_role = get_user_role(issuer.username)
 
     if not can_manage_blacklist(issuer_role):
-        await message.reply_text("❌ У вас нет прав на управление черным списком! (требуется СЗМ+)")
+        error_msg = await message.reply_text("❌ У вас нет прав на управление черным списком! (требуется СЗМ+)")
+        asyncio.create_task(
+            delete_messages_after_delay(context, message.chat.id,
+                                      [message.message_id, error_msg.message_id],
+                                      DELETE_AFTER_SECONDS)
+        )
         return
 
     target_user_id = None
@@ -827,14 +1028,20 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target_user_id = target_user.id
         target_user_name = target_user.full_name
         target_username = target_user.username or str(target_user_id)
+        register_user(target_user_id, target_user.username, target_user_name)
 
         text = message.text.strip()
         parts = text.split(maxsplit=2)
 
         if len(parts) < 3:
-            await message.reply_text(
+            error_msg = await message.reply_text(
                 "❌ Укажите количество дней и причину!\n\n"
                 "Пример: /bl 7 Нарушение правил"
+            )
+            asyncio.create_task(
+                delete_messages_after_delay(context, message.chat.id,
+                                          [message.message_id, error_msg.message_id],
+                                          DELETE_AFTER_SECONDS)
             )
             return
 
@@ -843,7 +1050,12 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if days <= 0:
                 raise ValueError
         except ValueError:
-            await message.reply_text("❌ Количество дней должно быть положительным числом!")
+            error_msg = await message.reply_text("❌ Количество дней должно быть положительным числом!")
+            asyncio.create_task(
+                delete_messages_after_delay(context, message.chat.id,
+                                          [message.message_id, error_msg.message_id],
+                                          DELETE_AFTER_SECONDS)
+            )
             return
 
         reason = parts[2]
@@ -852,12 +1064,17 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parts = text.split(maxsplit=3)
 
         if len(parts) < 4:
-            await message.reply_text(
+            error_msg = await message.reply_text(
                 "❌ Неправильный формат!\n\n"
                 "Используйте:\n"
                 "1. Ответ на сообщение: /bl дни причина\n"
                 "2. Упоминание: /bl @username дни причина\n\n"
                 "Пример: /bl @breakbrosmiling 7 Нарушение правил"
+            )
+            asyncio.create_task(
+                delete_messages_after_delay(context, message.chat.id,
+                                          [message.message_id, error_msg.message_id],
+                                          DELETE_AFTER_SECONDS)
             )
             return
 
@@ -868,7 +1085,12 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if days <= 0:
                 raise ValueError
         except ValueError:
-            await message.reply_text("❌ Количество дней должно быть положительным числом!")
+            error_msg = await message.reply_text("❌ Количество дней должно быть положительным числом!")
+            asyncio.create_task(
+                delete_messages_after_delay(context, message.chat.id,
+                                          [message.message_id, error_msg.message_id],
+                                          DELETE_AFTER_SECONDS)
+            )
             return
 
         reason = parts[3]
@@ -880,14 +1102,30 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     target_user_id = target_user.id
                     target_user_name = target_user.full_name
                     target_username = target_user.username or str(target_user_id)
+                    register_user(target_user_id, target_user.username, target_user_name)
                     break
 
         if target_user_id is None:
-            target_user_name = f"@{target_username}"
-            target_user_id = f"username_{target_username}"
+            target_user_id, target_user_name = find_user_id_by_username(target_username)
+            if target_user_id is None:
+                error_msg = await message.reply_text(
+                    f"❌ Пользователь @{target_username} не найден!\n"
+                    f"💡 Попросите его написать /start боту"
+                )
+                asyncio.create_task(
+                    delete_messages_after_delay(context, message.chat.id,
+                                              [message.message_id, error_msg.message_id],
+                                              DELETE_AFTER_SECONDS)
+                )
+                return
 
     if not target_username and not target_user_id:
-        await message.reply_text("❌ Не удалось определить пользователя!")
+        error_msg = await message.reply_text("❌ Не удалось определить пользователя!")
+        asyncio.create_task(
+            delete_messages_after_delay(context, message.chat.id,
+                                      [message.message_id, error_msg.message_id],
+                                      DELETE_AFTER_SECONDS)
+        )
         return
 
     entry = add_to_blacklist(target_user_id, target_user_name, target_username, days, reason,
@@ -918,10 +1156,16 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='HTML'
     )
 
-    await message.reply_text(
+    success_msg = await message.reply_text(
         f"✅ {user_link} добавлен в черный список на {days} дн.\n"
         f"До: {end_date.strftime('%d.%m.%Y')}",
         parse_mode='HTML'
+    )
+
+    asyncio.create_task(
+        delete_messages_after_delay(context, message.chat.id,
+                                  [message.message_id, success_msg.message_id],
+                                  DELETE_AFTER_SECONDS)
     )
 
     logger.info(f"Blacklist: {target_username} by {issuer.username} for {days} days")
@@ -935,10 +1179,16 @@ async def unblacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     issuer = message.from_user
+    register_user(issuer.id, issuer.username, issuer.full_name)
     issuer_role = get_user_role(issuer.username)
 
     if not can_manage_blacklist(issuer_role):
-        await message.reply_text("❌ У вас нет прав на управление черным списком! (требуется СЗМ+)")
+        error_msg = await message.reply_text("❌ У вас нет прав на управление черным списком! (требуется СЗМ+)")
+        asyncio.create_task(
+            delete_messages_after_delay(context, message.chat.id,
+                                      [message.message_id, error_msg.message_id],
+                                      DELETE_AFTER_SECONDS)
+        )
         return
 
     target_user_id = None
@@ -950,16 +1200,22 @@ async def unblacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         target_user_id = target_user.id
         target_user_name = target_user.full_name
         target_username = target_user.username or str(target_user_id)
+        register_user(target_user_id, target_user.username, target_user_name)
     else:
         text = message.text.strip()
         parts = text.split(maxsplit=1)
 
         if len(parts) < 2:
-            await message.reply_text(
+            error_msg = await message.reply_text(
                 "❌ Неправильный формат!\n\n"
                 "Используйте:\n"
                 "1. Ответ на сообщение: /ubl\n"
                 "2. Упоминание: /ubl @username"
+            )
+            asyncio.create_task(
+                delete_messages_after_delay(context, message.chat.id,
+                                          [message.message_id, error_msg.message_id],
+                                          DELETE_AFTER_SECONDS)
             )
             return
 
@@ -972,20 +1228,41 @@ async def unblacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE
                     target_user_id = target_user.id
                     target_user_name = target_user.full_name
                     target_username = target_user.username or str(target_user_id)
+                    register_user(target_user_id, target_user.username, target_user_name)
                     break
 
         if target_user_id is None:
-            target_user_name = f"@{target_username}"
-            target_user_id = f"username_{target_username}"
+            target_user_id, target_user_name = find_user_id_by_username(target_username)
+            if target_user_id is None:
+                error_msg = await message.reply_text(
+                    f"❌ Пользователь @{target_username} не найден!\n"
+                    f"💡 Попросите его написать /start боту"
+                )
+                asyncio.create_task(
+                    delete_messages_after_delay(context, message.chat.id,
+                                              [message.message_id, error_msg.message_id],
+                                              DELETE_AFTER_SECONDS)
+                )
+                return
 
     if not target_username and not target_user_id:
-        await message.reply_text("❌ Не удалось определить пользователя!")
+        error_msg = await message.reply_text("❌ Не удалось определить пользователя!")
+        asyncio.create_task(
+            delete_messages_after_delay(context, message.chat.id,
+                                      [message.message_id, error_msg.message_id],
+                                      DELETE_AFTER_SECONDS)
+        )
         return
 
     removed = remove_from_blacklist(target_user_id)
 
     if not removed:
-        await message.reply_text(f"❌ Пользователь @{target_username} не находится в черном списке!")
+        error_msg = await message.reply_text(f"❌ Пользователь @{target_username} не находится в черном списке!")
+        asyncio.create_task(
+            delete_messages_after_delay(context, message.chat.id,
+                                      [message.message_id, error_msg.message_id],
+                                      DELETE_AFTER_SECONDS)
+        )
         return
 
     if isinstance(target_user_id, int):
@@ -1008,7 +1285,13 @@ async def unblacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         parse_mode='HTML'
     )
 
-    await message.reply_text(f"✅ {user_link} удален из черного списка!", parse_mode='HTML')
+    success_msg = await message.reply_text(f"✅ {user_link} удален из черного списка!", parse_mode='HTML')
+
+    asyncio.create_task(
+        delete_messages_after_delay(context, message.chat.id,
+                                  [message.message_id, success_msg.message_id],
+                                  DELETE_AFTER_SECONDS)
+    )
 
     logger.info(f"Unblacklisted: {target_username} by {issuer.username}")
 
@@ -1028,6 +1311,7 @@ async def handle_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     sender = message.from_user
+    register_user(sender.id, sender.username, sender.full_name)
     sender_role = get_user_role(sender.username)
     expected_category = get_report_category(sender_role)
 
@@ -1098,6 +1382,7 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
     report_id = parts[2]
 
     checker = query.from_user
+    register_user(checker.id, checker.username, checker.full_name)
     checker_role = get_user_role(checker.username)
 
     if not can_check_report(checker_role, category):
@@ -1148,10 +1433,11 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
     del reports_data[report_key]
 
 def main():
-    logger.info("🚀 Запуск бота с командами сброса статистики")
+    logger.info("🚀 Запуск бота - ФИНАЛЬНАЯ ВЕРСИЯ")
     logger.info(f"👥 Загружено пользователей: {len(USERS_ROLES)}")
     logger.info(f"📋 ID темы выговоров: {WARNINGS_TOPIC_ID}")
     logger.info(f"📋 ID темы черного списка: {BLACKLIST_TOPIC_ID}")
+    logger.info("✅ Все функции активны")
 
     application = Application.builder().token(BOT_TOKEN).build()
 
@@ -1166,7 +1452,7 @@ def main():
     application.add_handler(MessageHandler(filters.PHOTO & filters.ChatType.SUPERGROUP, handle_report))
     application.add_handler(CallbackQueryHandler(handle_button_callback))
 
-    logger.info("✅ Бот запущен! Добавлены команды /sp и /so")
+    logger.info("✅ Бот запущен! Все системы работают")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':

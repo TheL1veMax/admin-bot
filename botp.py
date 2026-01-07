@@ -38,7 +38,8 @@ DEPUTY_ADMIN_USERNAME = 'the_pr1estesss'
 stats_cooldowns = {}
 
 class Role(IntEnum):
-    ГЛАВНЫЙ_АДМИН = 7
+    ГЛАВНЫЙ_АДМИН = 8
+    СЗА = 7
     ЗАМ_ГЛАВНОГО = 6
     СТАРШИЙ_АДМИН = 5
     СЗМ = 4
@@ -49,6 +50,7 @@ class Role(IntEnum):
 
 USERS_ROLES = {}
 USERS_ROLES['glavnyy_admin'] = Role.ГЛАВНЫЙ_АДМИН
+USERS_ROLES['gerrinetwork'] = Role.СЗА
 USERS_ROLES['the_pr1estesss'] = Role.ЗАМ_ГЛАВНОГО
 USERS_ROLES['qwertyuiopasdfghjklzxcvbnm123411'] = Role.СТАРШИЙ_АДМИН
 USERS_ROLES['mskmboky'] = Role.СТАРШИЙ_АДМИН
@@ -113,6 +115,22 @@ def update_user_stats(user_id: int, user_name: str, action: str):
         stats[user_key]['rejected'] += 1
     save_stats(stats)
     return stats[user_key]
+
+def reset_user_stats(user_id: int, stat_type: str):
+    """Сброс статистики пользователя
+    stat_type: 'accepted' или 'rejected'
+    """
+    stats = load_stats()
+    user_key = str(user_id)
+
+    if user_key not in stats:
+        return None
+
+    old_value = stats[user_key].get(stat_type, 0)
+    stats[user_key][stat_type] = 0
+    save_stats(stats)
+
+    return old_value
 
 def load_warnings():
     if os.path.exists(WARNINGS_FILE):
@@ -251,6 +269,8 @@ def get_user_role(username: str) -> Role:
 def can_check_report(checker_role: Role, report_type: str) -> bool:
     if checker_role is None:
         return False
+    if checker_role >= Role.СЗА:
+        return True
     if checker_role >= Role.СТАРШИЙ_АДМИН:
         return True
     if checker_role >= Role.АДМИН and report_type == 'moderator':
@@ -269,8 +289,14 @@ def can_manage_blacklist(user_role: Role) -> bool:
 def can_view_others_stats(user_role: Role) -> bool:
     return user_role is not None and user_role >= Role.СЗМ
 
+def can_reset_stats(user_role: Role) -> bool:
+    """Проверка прав на сброс статистики (СЗМ+)"""
+    return user_role is not None and user_role >= Role.СЗМ
+
 def get_report_category(user_role: Role) -> str:
     if user_role is None:
+        return None
+    if user_role >= Role.СЗА:
         return None
     if user_role <= Role.СТАРШИЙ_МОДЕРАТОР:
         return 'moderator'
@@ -310,14 +336,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"👤 Ваша роль: {role_name}\n\n"
         "📋 Отправляйте отчеты в соответствующую тему:\n"
         "• Модераторы и ст.модераторы → Отчетность модерации\n"
-        "• Мл.админы, админы, СЗМ → Отчетность администрации\n\n"
+        "• Мл.админы, админы, СЗМ → Отчетность администрации\n"
+        "• СЗА и Главный Админ → не сдают отчеты\n\n"
         "⚠️ Команды:\n"
         "/stats - ваша статистика отчетов\n"
         "/stats @username - статистика пользователя (СЗМ+)\n"
         "/vg - выдать выговор (СЗМ+)\n"
         "/svg - снять выговор (СЗМ+)\n"
         "/bl - добавить в черный список (СЗМ+)\n"
-        "/ubl - убрать из черного списка (СЗМ+)"
+        "/ubl - убрать из черного списка (СЗМ+)\n"
+        "/sp - сбросить принятые отчеты (СЗМ+)\n"
+        "/so - сбросить отклоненные отчеты (СЗМ+)"
     )
     await update.message.reply_text(message_text)
 
@@ -424,6 +453,164 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                    [message.message_id, stats_msg.message_id], 
                                    DELETE_AFTER_SECONDS)
     )
+
+async def reset_accepted_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /sp - сброс принятых отчетов"""
+    message = update.message
+
+    if message.chat.id != GROUP_CHAT_ID:
+        await message.reply_text("❌ Команда работает только в группе!")
+        return
+
+    issuer = message.from_user
+    issuer_role = get_user_role(issuer.username)
+
+    if not can_reset_stats(issuer_role):
+        await message.reply_text("❌ У вас нет прав на сброс статистики! (требуется СЗМ+)")
+        return
+
+    target_user_id = None
+    target_user_name = None
+    target_username = None
+
+    if message.reply_to_message:
+        target_user = message.reply_to_message.from_user
+        target_user_id = target_user.id
+        target_user_name = target_user.full_name
+        target_username = target_user.username or str(target_user_id)
+    else:
+        text = message.text.strip()
+        parts = text.split(maxsplit=1)
+
+        if len(parts) < 2:
+            await message.reply_text(
+                "❌ Неправильный формат!\n\n"
+                "Используйте:\n"
+                "1. Ответ на сообщение: /sp\n"
+                "2. Упоминание: /sp @username"
+            )
+            return
+
+        target_username = parts[1].lstrip('@')
+
+        if message.entities:
+            for entity in message.entities:
+                if entity.type == "text_mention":
+                    target_user = entity.user
+                    target_user_id = target_user.id
+                    target_user_name = target_user.full_name
+                    target_username = target_user.username or str(target_user_id)
+                    break
+
+        if target_user_id is None:
+            found_id, found_data = get_user_stats_by_username(target_username)
+            if found_id:
+                target_user_id = int(found_id)
+                target_user_name = found_data.get('name', f'@{target_username}')
+            else:
+                await message.reply_text(f"❌ Пользователь @{target_username} не найден в статистике!")
+                return
+
+    old_value = reset_user_stats(target_user_id, 'accepted')
+
+    if old_value is None:
+        await message.reply_text(f"❌ Пользователь @{target_username} не найден в статистике!")
+        return
+
+    if isinstance(target_user_id, int):
+        user_link = f"<a href='tg://user?id={target_user_id}'>{target_user_name}</a>"
+    else:
+        user_link = f"@{target_username}"
+
+    await message.reply_text(
+        f"✅ <b>Принятые отчеты сброшены</b>\n\n"
+        f"👤 Пользователь: {user_link}\n"
+        f"📊 Было: {old_value} → Стало: 0\n"
+        f"👨‍💼 Сбросил: {issuer.mention_html()}\n"
+        f"🎖 Роль: {issuer_role.name}",
+        parse_mode='HTML'
+    )
+
+    logger.info(f"Reset accepted stats: {target_username} by {issuer.username}, was {old_value}")
+
+async def reset_rejected_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /so - сброс отклоненных отчетов"""
+    message = update.message
+
+    if message.chat.id != GROUP_CHAT_ID:
+        await message.reply_text("❌ Команда работает только в группе!")
+        return
+
+    issuer = message.from_user
+    issuer_role = get_user_role(issuer.username)
+
+    if not can_reset_stats(issuer_role):
+        await message.reply_text("❌ У вас нет прав на сброс статистики! (требуется СЗМ+)")
+        return
+
+    target_user_id = None
+    target_user_name = None
+    target_username = None
+
+    if message.reply_to_message:
+        target_user = message.reply_to_message.from_user
+        target_user_id = target_user.id
+        target_user_name = target_user.full_name
+        target_username = target_user.username or str(target_user_id)
+    else:
+        text = message.text.strip()
+        parts = text.split(maxsplit=1)
+
+        if len(parts) < 2:
+            await message.reply_text(
+                "❌ Неправильный формат!\n\n"
+                "Используйте:\n"
+                "1. Ответ на сообщение: /so\n"
+                "2. Упоминание: /so @username"
+            )
+            return
+
+        target_username = parts[1].lstrip('@')
+
+        if message.entities:
+            for entity in message.entities:
+                if entity.type == "text_mention":
+                    target_user = entity.user
+                    target_user_id = target_user.id
+                    target_user_name = target_user.full_name
+                    target_username = target_user.username or str(target_user_id)
+                    break
+
+        if target_user_id is None:
+            found_id, found_data = get_user_stats_by_username(target_username)
+            if found_id:
+                target_user_id = int(found_id)
+                target_user_name = found_data.get('name', f'@{target_username}')
+            else:
+                await message.reply_text(f"❌ Пользователь @{target_username} не найден в статистике!")
+                return
+
+    old_value = reset_user_stats(target_user_id, 'rejected')
+
+    if old_value is None:
+        await message.reply_text(f"❌ Пользователь @{target_username} не найден в статистике!")
+        return
+
+    if isinstance(target_user_id, int):
+        user_link = f"<a href='tg://user?id={target_user_id}'>{target_user_name}</a>"
+    else:
+        user_link = f"@{target_username}"
+
+    await message.reply_text(
+        f"✅ <b>Отклоненные отчеты сброшены</b>\n\n"
+        f"👤 Пользователь: {user_link}\n"
+        f"📊 Было: {old_value} → Стало: 0\n"
+        f"👨‍💼 Сбросил: {issuer.mention_html()}\n"
+        f"🎖 Роль: {issuer_role.name}",
+        parse_mode='HTML'
+    )
+
+    logger.info(f"Reset rejected stats: {target_username} by {issuer.username}, was {old_value}")
 
 async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /vg - выдать выговор"""
@@ -635,7 +822,6 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     days = None
     reason = None
 
-    # СПОСОБ 1: Ответ на сообщение
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
         target_user_id = target_user.id
@@ -661,8 +847,6 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         reason = parts[2]
-
-    # СПОСОБ 2: Упоминание пользователя
     else:
         text = message.text.strip()
         parts = text.split(maxsplit=3)
@@ -677,7 +861,6 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # parts[0] = '/bl', parts[1] = '@username', parts[2] = 'дни', parts[3] = 'причина'
         target_username = parts[1].lstrip('@')
 
         try:
@@ -690,7 +873,6 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         reason = parts[3]
 
-        # Проверяем text_mention
         if message.entities:
             for entity in message.entities:
                 if entity.type == "text_mention":
@@ -708,7 +890,6 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await message.reply_text("❌ Не удалось определить пользователя!")
         return
 
-    # Добавляем в черный список
     entry = add_to_blacklist(target_user_id, target_user_name, target_username, days, reason,
                              issuer.username or issuer.full_name)
 
@@ -717,7 +898,6 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         user_link = f"@{target_username}"
 
-    # Форматируем даты
     start_date = datetime.fromisoformat(entry['start_date'])
     end_date = datetime.fromisoformat(entry['end_date'])
 
@@ -968,8 +1148,9 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
     del reports_data[report_key]
 
 def main():
-    logger.info("🚀 Запуск бота с черным списком")
+    logger.info("🚀 Запуск бота с командами сброса статистики")
     logger.info(f"👥 Загружено пользователей: {len(USERS_ROLES)}")
+    logger.info(f"📋 ID темы выговоров: {WARNINGS_TOPIC_ID}")
     logger.info(f"📋 ID темы черного списка: {BLACKLIST_TOPIC_ID}")
 
     application = Application.builder().token(BOT_TOKEN).build()
@@ -980,10 +1161,12 @@ def main():
     application.add_handler(CommandHandler("svg", remove_warning_command))
     application.add_handler(CommandHandler("bl", blacklist_command))
     application.add_handler(CommandHandler("ubl", unblacklist_command))
+    application.add_handler(CommandHandler("sp", reset_accepted_command))
+    application.add_handler(CommandHandler("so", reset_rejected_command))
     application.add_handler(MessageHandler(filters.PHOTO & filters.ChatType.SUPERGROUP, handle_report))
     application.add_handler(CallbackQueryHandler(handle_button_callback))
 
-    logger.info("✅ Бот запущен! Добавлены команды /bl и /ubl")
+    logger.info("✅ Бот запущен! Добавлены команды /sp и /so")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':

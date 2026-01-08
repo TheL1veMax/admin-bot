@@ -75,29 +75,20 @@ USERS_ROLES['za_spartakmsk'] = Role.МОДЕРАТОР
 reports_data = {}
 
 def get_display_name(user):
-    """Получить отображаемое имя с защитой от 'None' строк"""
-    logger.info(f"🔍 get_display_name: ID={user.id}, full_name={repr(user.full_name)}, first_name={repr(user.first_name)}, username={user.username}")
-
     if hasattr(user, 'full_name') and user.full_name:
         name_str = str(user.full_name).strip()
         if name_str and name_str.lower() not in ['none', 'null', '', 'group']:
-            logger.info(f"✅ Used full_name: {name_str}")
             return name_str
 
     if hasattr(user, 'first_name') and user.first_name:
         name_str = str(user.first_name).strip()
         if name_str and name_str.lower() not in ['none', 'null', '', 'group']:
-            logger.info(f"✅ Used first_name: {name_str}")
             return name_str
 
     if hasattr(user, 'username') and user.username:
-        result = f"@{user.username}"
-        logger.info(f"✅ Used username: {result}")
-        return result
+        return f"@{user.username}"
 
-    result = f"User_{user.id}"
-    logger.info(f"⚠️ Fallback to User_ID: {result}")
-    return result
+    return f"User_{user.id}"
 
 def load_user_ids():
     if os.path.exists(USER_IDS_FILE):
@@ -350,27 +341,29 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     register_user(user.id, user.username, user_display_name)
     user_role = get_user_role(user.username)
     role_name = user_role.name if user_role else "Не назначена"
+
     message_text = (
-        "✅ Бот запущен!\n\n"
-        f"👤 {user_display_name}\n"
-        f"🎖 Ваша роль: {role_name}\n"
-        f"🆔 ID: {user.id}\n\n"
-        "📋 Команды:\n"
-        "/stats - статистика\n"
-        "/vg @username причина\n"
-        "/svg @username\n"
-        "/bl @username дни причина\n"
-        "/ubl @username\n"
-        "/sp @username\n"
-        "/so @username"
+        "✅ Бот для проверки отчетов модерации запущен!\n\n"
+        f"👤 Ваша роль: {role_name}\n\n"
+        "📋 Отправляйте отчеты в соответствующую тему:\n"
+        "• Модераторы и ст.модераторы → Отчетность модерации\n"
+        "• Мл.админы, админы, СЗМ → Отчетность администрации\n"
+        "• СЗА и Главный Админ → не сдают отчеты\n\n"
+        "⚠️ Команды:\n"
+        "/stats - ваша статистика отчетов\n"
+        "/stats @username - статистика пользователя (СЗМ+)\n"
+        "/vg - выдать выговор (СЗМ+)\n"
+        "/svg - снять выговор (СЗМ+)\n"
+        "/bl - добавить в черный список (СЗМ+)\n"
+        "/ubl - убрать из черного списка (СЗМ+)\n"
+        "/sp - сбросить принятые отчеты (СЗМ+)\n"
+        "/so - сбросить отклоненные отчеты (СЗМ+)"
     )
     await update.message.reply_text(message_text)
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
     user = message.from_user
-
-    logger.info(f"📊 /stats from ID={user.id}, username={user.username}, full_name={repr(user.full_name)}, first_name={repr(user.first_name)}")
 
     user_display_name = get_display_name(user)
     register_user(user.id, user.username, user_display_name)
@@ -393,10 +386,17 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
-        target_user_id = target_user.id
-        target_user_name = get_display_name(target_user)
-        target_username = target_user.username or str(target_user_id)
-        register_user(target_user_id, target_user.username, target_user_name)
+
+        # ФИКС: Если ответ на GroupAnonymousBot - показать свою статистику
+        if target_user.id == 1087968824:
+            target_user_id = user.id
+            target_user_name = user_display_name
+            target_username = user.username or str(user.id)
+        else:
+            target_user_id = target_user.id
+            target_user_name = get_display_name(target_user)
+            target_username = target_user.username or str(target_user_id)
+            register_user(target_user_id, target_user.username, target_user_name)
     else:
         text = message.text.strip()
         parts = text.split(maxsplit=1)
@@ -413,11 +413,12 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 for entity in message.entities:
                     if entity.type == "text_mention":
                         target_user = entity.user
-                        target_user_id = target_user.id
-                        target_user_name = get_display_name(target_user)
-                        target_username = target_user.username or str(target_user_id)
-                        register_user(target_user_id, target_user.username, target_user_name)
-                        break
+                        if target_user.id != 1087968824:
+                            target_user_id = target_user.id
+                            target_user_name = get_display_name(target_user)
+                            target_username = target_user.username or str(target_user_id)
+                            register_user(target_user_id, target_user.username, target_user_name)
+                            break
 
             if target_user_id is None:
                 found_id, _ = find_user_id_by_username(target_username)
@@ -432,8 +433,6 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             target_user_id = user.id
             target_user_name = user_display_name
             target_username = user.username or str(user.id)
-
-    logger.info(f"📊 Final display name: {target_user_name}")
 
     user_stats = get_user_stats(target_user_id)
     target_role = get_user_role(target_username) if isinstance(target_username, str) and not target_username.isdigit() else None
@@ -485,6 +484,12 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
+
+        if target_user.id == 1087968824:
+            error_msg = await message.reply_text("❌ Нельзя выдать выговор анонимному сообщению!")
+            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
+            return
+
         target_user_id = target_user.id
         target_user_name = get_display_name(target_user)
         target_username = target_user.username or str(target_user_id)
@@ -513,11 +518,12 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for entity in message.entities:
                 if entity.type == "text_mention":
                     target_user = entity.user
-                    target_user_id = target_user.id
-                    target_user_name = get_display_name(target_user)
-                    target_username = target_user.username or str(target_user_id)
-                    register_user(target_user_id, target_user.username, target_user_name)
-                    break
+                    if target_user.id != 1087968824:
+                        target_user_id = target_user.id
+                        target_user_name = get_display_name(target_user)
+                        target_username = target_user.username or str(target_user_id)
+                        register_user(target_user_id, target_user.username, target_user_name)
+                        break
 
         if target_user_id is None:
             found_id, _ = find_user_id_by_username(target_username)
@@ -579,6 +585,12 @@ async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_T
 
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
+
+        if target_user.id == 1087968824:
+            error_msg = await message.reply_text("❌ Нельзя снять выговор с анонимного сообщения!")
+            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
+            return
+
         target_user_id = target_user.id
         target_user_name = get_display_name(target_user)
         target_username = target_user.username or str(target_user_id)
@@ -598,11 +610,12 @@ async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_T
             for entity in message.entities:
                 if entity.type == "text_mention":
                     target_user = entity.user
-                    target_user_id = target_user.id
-                    target_user_name = get_display_name(target_user)
-                    target_username = target_user.username or str(target_user_id)
-                    register_user(target_user_id, target_user.username, target_user_name)
-                    break
+                    if target_user.id != 1087968824:
+                        target_user_id = target_user.id
+                        target_user_name = get_display_name(target_user)
+                        target_username = target_user.username or str(target_user_id)
+                        register_user(target_user_id, target_user.username, target_user_name)
+                        break
 
         if target_user_id is None:
             found_id, _ = find_user_id_by_username(target_username)
@@ -662,6 +675,12 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
+
+        if target_user.id == 1087968824:
+            error_msg = await message.reply_text("❌ Нельзя добавить анонимное сообщение в ЧС!")
+            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
+            return
+
         target_user_id = target_user.id
         target_user_name = get_display_name(target_user)
         target_username = target_user.username or str(target_user_id)
@@ -711,11 +730,12 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for entity in message.entities:
                 if entity.type == "text_mention":
                     target_user = entity.user
-                    target_user_id = target_user.id
-                    target_user_name = get_display_name(target_user)
-                    target_username = target_user.username or str(target_user_id)
-                    register_user(target_user_id, target_user.username, target_user_name)
-                    break
+                    if target_user.id != 1087968824:
+                        target_user_id = target_user.id
+                        target_user_name = get_display_name(target_user)
+                        target_username = target_user.username or str(target_user_id)
+                        register_user(target_user_id, target_user.username, target_user_name)
+                        break
 
         if target_user_id is None:
             found_id, _ = find_user_id_by_username(target_username)
@@ -770,6 +790,12 @@ async def unblacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
+
+        if target_user.id == 1087968824:
+            error_msg = await message.reply_text("❌ Нельзя убрать анонимное сообщение из ЧС!")
+            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
+            return
+
         target_user_id = target_user.id
         target_user_name = get_display_name(target_user)
         target_username = target_user.username or str(target_user_id)
@@ -789,11 +815,12 @@ async def unblacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE
             for entity in message.entities:
                 if entity.type == "text_mention":
                     target_user = entity.user
-                    target_user_id = target_user.id
-                    target_user_name = get_display_name(target_user)
-                    target_username = target_user.username or str(target_user_id)
-                    register_user(target_user_id, target_user.username, target_user_name)
-                    break
+                    if target_user.id != 1087968824:
+                        target_user_id = target_user.id
+                        target_user_name = get_display_name(target_user)
+                        target_username = target_user.username or str(target_user_id)
+                        register_user(target_user_id, target_user.username, target_user_name)
+                        break
 
         if target_user_id is None:
             found_id, _ = find_user_id_by_username(target_username)
@@ -846,6 +873,12 @@ async def reset_accepted_command(update: Update, context: ContextTypes.DEFAULT_T
 
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
+
+        if target_user.id == 1087968824:
+            error_msg = await message.reply_text("❌ Нельзя сбросить статистику анонимного сообщения!")
+            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
+            return
+
         target_user_id = target_user.id
         target_user_name = get_display_name(target_user)
         target_username = target_user.username or str(target_user_id)
@@ -865,11 +898,12 @@ async def reset_accepted_command(update: Update, context: ContextTypes.DEFAULT_T
             for entity in message.entities:
                 if entity.type == "text_mention":
                     target_user = entity.user
-                    target_user_id = target_user.id
-                    target_user_name = get_display_name(target_user)
-                    target_username = target_user.username or str(target_user_id)
-                    register_user(target_user_id, target_user.username, target_user_name)
-                    break
+                    if target_user.id != 1087968824:
+                        target_user_id = target_user.id
+                        target_user_name = get_display_name(target_user)
+                        target_username = target_user.username or str(target_user_id)
+                        register_user(target_user_id, target_user.username, target_user_name)
+                        break
 
         if target_user_id is None:
             found_id, _ = find_user_id_by_username(target_username)
@@ -918,6 +952,12 @@ async def reset_rejected_command(update: Update, context: ContextTypes.DEFAULT_T
 
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
+
+        if target_user.id == 1087968824:
+            error_msg = await message.reply_text("❌ Нельзя сбросить статистику анонимного сообщения!")
+            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
+            return
+
         target_user_id = target_user.id
         target_user_name = get_display_name(target_user)
         target_username = target_user.username or str(target_user_id)
@@ -937,11 +977,12 @@ async def reset_rejected_command(update: Update, context: ContextTypes.DEFAULT_T
             for entity in message.entities:
                 if entity.type == "text_mention":
                     target_user = entity.user
-                    target_user_id = target_user.id
-                    target_user_name = get_display_name(target_user)
-                    target_username = target_user.username or str(target_user_id)
-                    register_user(target_user_id, target_user.username, target_user_name)
-                    break
+                    if target_user.id != 1087968824:
+                        target_user_id = target_user.id
+                        target_user_name = get_display_name(target_user)
+                        target_username = target_user.username or str(target_user_id)
+                        register_user(target_user_id, target_user.username, target_user_name)
+                        break
 
         if target_user_id is None:
             found_id, _ = find_user_id_by_username(target_username)
@@ -1110,9 +1151,7 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
     del reports_data[report_key]
 
 def main():
-    logger.info("🚀 FULLY FIXED VERSION - DEBUG LOGS ENABLED")
-    logger.info("✅ get_display_name() checks for 'None'/'Group' strings + fallback chain")
-    logger.info(f"👥 Users: {len(USERS_ROLES)}")
+    logger.info("🚀 Bot started - GroupAnonymousBot fix applied")
 
     application = Application.builder().token(BOT_TOKEN).build()
 
@@ -1127,7 +1166,7 @@ def main():
     application.add_handler(MessageHandler(filters.PHOTO & filters.ChatType.SUPERGROUP, handle_report))
     application.add_handler(CallbackQueryHandler(handle_button_callback))
 
-    logger.info("✅ Bot started with full debugging!")
+    logger.info("✅ Bot running!")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':

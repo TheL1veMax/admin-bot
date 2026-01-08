@@ -74,6 +74,18 @@ USERS_ROLES['za_spartakmsk'] = Role.МОДЕРАТОР
 
 reports_data = {}
 
+def get_display_name(user):
+    """Получить отображаемое имя пользователя с гарантией НЕ-None"""
+    if hasattr(user, 'full_name') and user.full_name and user.full_name.strip():
+        return user.full_name
+    if hasattr(user, 'first_name') and user.first_name and user.first_name.strip():
+        return user.first_name
+    if hasattr(user, 'username') and user.username:
+        return f"@{user.username}"
+    if hasattr(user, 'id'):
+        return f"User_{user.id}"
+    return "Unknown"
+
 def load_user_ids():
     if os.path.exists(USER_IDS_FILE):
         try:
@@ -334,12 +346,14 @@ def get_checkers_usernames(category: str) -> list:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
-    register_user(user.id, user.username, user.full_name)
+    user_display_name = get_display_name(user)
+    register_user(user.id, user.username, user_display_name)
     user_role = get_user_role(user.username)
     role_name = user_role.name if user_role else "Не назначена"
     message_text = (
         "✅ Бот запущен!\n\n"
-        f"👤 Ваша роль: {role_name}\n"
+        f"👤 {user_display_name}\n"
+        f"🎖 Ваша роль: {role_name}\n"
         f"🆔 ID: {user.id}\n\n"
         "📋 Команды:\n"
         "/stats - статистика\n"
@@ -355,7 +369,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
     user = message.from_user
-    register_user(user.id, user.username, user.full_name)
+    user_display_name = get_display_name(user)
+    register_user(user.id, user.username, user_display_name)
     user_role = get_user_role(user.username)
     current_time = time.time()
     user_key = str(user.id)
@@ -374,7 +389,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
         target_user_id = target_user.id
-        target_user_name = target_user.full_name
+        target_user_name = get_display_name(target_user)
         target_username = target_user.username or str(target_user_id)
         register_user(target_user_id, target_user.username, target_user_name)
     else:
@@ -392,7 +407,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if entity.type == "text_mention":
                         target_user = entity.user
                         target_user_id = target_user.id
-                        target_user_name = target_user.full_name
+                        target_user_name = get_display_name(target_user)
                         target_username = target_user.username or str(target_user_id)
                         register_user(target_user_id, target_user.username, target_user_name)
                         break
@@ -416,11 +431,11 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
         else:
             target_user_id = user.id
-            target_user_name = user.full_name
+            target_user_name = user_display_name
             target_username = user.username or str(user.id)
 
     if not target_user_name or target_user_name == "None":
-        target_user_name = f"@{target_username}"
+        target_user_name = f"@{target_username}" if target_username else f"User_{target_user_id}"
 
     user_stats = get_user_stats(target_user_id)
     target_role = get_user_role(target_username)
@@ -456,7 +471,8 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     issuer = message.from_user
-    register_user(issuer.id, issuer.username, issuer.full_name)
+    issuer_display_name = get_display_name(issuer)
+    register_user(issuer.id, issuer.username, issuer_display_name)
     issuer_role = get_user_role(issuer.username)
 
     if not can_issue_warning(issuer_role):
@@ -474,10 +490,10 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
         target_user_id = target_user.id
-        target_user_name = target_user.full_name
+        target_user_name = get_display_name(target_user)
         target_username = target_user.username or str(target_user_id)
         register_user(target_user_id, target_user.username, target_user_name)
-        logger.info(f"✅ From REPLY: ID={target_user_id}")
+        logger.info(f"✅ From REPLY: ID={target_user_id}, Name={target_user_name}")
 
         text = message.text.strip()
         parts = text.split(maxsplit=1)
@@ -505,10 +521,10 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if entity.type == "text_mention":
                     target_user = entity.user
                     target_user_id = target_user.id
-                    target_user_name = target_user.full_name
+                    target_user_name = get_display_name(target_user)
                     target_username = target_user.username or str(target_user_id)
                     register_user(target_user_id, target_user.username, target_user_name)
-                    logger.info(f"✅ Via text_mention: ID={target_user_id}")
+                    logger.info(f"✅ Via text_mention: ID={target_user_id}, Name={target_user_name}")
                     break
 
         if target_user_id is None:
@@ -534,10 +550,10 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not target_user_name or target_user_name == "None":
-        target_user_name = f"@{target_username}"
-        logger.warning(f"⚠️ Using username as fallback: {target_user_name}")
+        target_user_name = f"@{target_username}" if target_username else f"User_{target_user_id}"
+        logger.warning(f"⚠️ Using fallback name: {target_user_name}")
 
-    warning_count = add_warning(target_user_id, target_user_name, target_username, reason, issuer.username or issuer.full_name)
+    warning_count = add_warning(target_user_id, target_user_name, target_username or str(target_user_id), reason, issuer.username or issuer_display_name)
 
     if warning_count is None:
         error_msg = await message.reply_text("❌ Ошибка выдачи!")
@@ -549,7 +565,7 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     warning_message = (
         f"{warning_emoji} <b>ВЫГОВОР #{warning_count}/{MAX_WARNINGS}</b>\n\n"
-        f"👤 {user_link} (@{target_username})\n"
+        f"👤 {user_link}\n"
         f"🆔 {target_user_id}\n"
         f"📝 Причина: {reason}\n"
         f"👨‍💼 Выдал: {issuer.mention_html()} (@{issuer.username})\n"
@@ -570,7 +586,7 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     success_msg = await message.reply_text(f"✅ Выговор #{warning_count} выдан {user_link}", parse_mode='HTML')
     asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, success_msg.message_id], DELETE_AFTER_SECONDS))
-    logger.info(f"✅ Warning issued to ID={target_user_id}")
+    logger.info(f"✅ Warning issued to ID={target_user_id}, Name={target_user_name}")
 
 async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
@@ -579,7 +595,8 @@ async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     issuer = message.from_user
-    register_user(issuer.id, issuer.username, issuer.full_name)
+    issuer_display_name = get_display_name(issuer)
+    register_user(issuer.id, issuer.username, issuer_display_name)
     issuer_role = get_user_role(issuer.username)
 
     if not can_remove_warning(issuer_role):
@@ -594,7 +611,7 @@ async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_T
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
         target_user_id = target_user.id
-        target_user_name = target_user.full_name
+        target_user_name = get_display_name(target_user)
         target_username = target_user.username or str(target_user_id)
         register_user(target_user_id, target_user.username, target_user_name)
     else:
@@ -613,7 +630,7 @@ async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_T
                 if entity.type == "text_mention":
                     target_user = entity.user
                     target_user_id = target_user.id
-                    target_user_name = target_user.full_name
+                    target_user_name = get_display_name(target_user)
                     target_username = target_user.username or str(target_user_id)
                     register_user(target_user_id, target_user.username, target_user_name)
                     break
@@ -634,9 +651,9 @@ async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     if not target_user_name or target_user_name == "None":
-        target_user_name = f"@{target_username}"
+        target_user_name = f"@{target_username}" if target_username else f"User_{target_user_id}"
 
-    new_count = remove_warning(target_user_id, issuer.username or issuer.full_name)
+    new_count = remove_warning(target_user_id, issuer.username or issuer_display_name)
 
     if new_count is None:
         error_msg = await message.reply_text(f"❌ Нет выговоров!")
@@ -667,7 +684,8 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     issuer = message.from_user
-    register_user(issuer.id, issuer.username, issuer.full_name)
+    issuer_display_name = get_display_name(issuer)
+    register_user(issuer.id, issuer.username, issuer_display_name)
     issuer_role = get_user_role(issuer.username)
 
     if not can_manage_blacklist(issuer_role):
@@ -684,7 +702,7 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
         target_user_id = target_user.id
-        target_user_name = target_user.full_name
+        target_user_name = get_display_name(target_user)
         target_username = target_user.username or str(target_user_id)
         register_user(target_user_id, target_user.username, target_user_name)
 
@@ -733,7 +751,7 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if entity.type == "text_mention":
                     target_user = entity.user
                     target_user_id = target_user.id
-                    target_user_name = target_user.full_name
+                    target_user_name = get_display_name(target_user)
                     target_username = target_user.username or str(target_user_id)
                     register_user(target_user_id, target_user.username, target_user_name)
                     break
@@ -754,9 +772,9 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not target_user_name or target_user_name == "None":
-        target_user_name = f"@{target_username}"
+        target_user_name = f"@{target_username}" if target_username else f"User_{target_user_id}"
 
-    entry = add_to_blacklist(target_user_id, target_user_name, target_username, days, reason, issuer.username or issuer.full_name)
+    entry = add_to_blacklist(target_user_id, target_user_name, target_username or str(target_user_id), days, reason, issuer.username or issuer_display_name)
 
     if entry is None:
         error_msg = await message.reply_text("❌ Ошибка!")
@@ -790,7 +808,8 @@ async def unblacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     issuer = message.from_user
-    register_user(issuer.id, issuer.username, issuer.full_name)
+    issuer_display_name = get_display_name(issuer)
+    register_user(issuer.id, issuer.username, issuer_display_name)
     issuer_role = get_user_role(issuer.username)
 
     if not can_manage_blacklist(issuer_role):
@@ -805,7 +824,7 @@ async def unblacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
         target_user_id = target_user.id
-        target_user_name = target_user.full_name
+        target_user_name = get_display_name(target_user)
         target_username = target_user.username or str(target_user_id)
         register_user(target_user_id, target_user.username, target_user_name)
     else:
@@ -824,7 +843,7 @@ async def unblacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE
                 if entity.type == "text_mention":
                     target_user = entity.user
                     target_user_id = target_user.id
-                    target_user_name = target_user.full_name
+                    target_user_name = get_display_name(target_user)
                     target_username = target_user.username or str(target_user_id)
                     register_user(target_user_id, target_user.username, target_user_name)
                     break
@@ -845,7 +864,7 @@ async def unblacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     if not target_user_name or target_user_name == "None":
-        target_user_name = f"@{target_username}"
+        target_user_name = f"@{target_username}" if target_username else f"User_{target_user_id}"
 
     removed = remove_from_blacklist(target_user_id)
 
@@ -873,7 +892,8 @@ async def reset_accepted_command(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     issuer = message.from_user
-    register_user(issuer.id, issuer.username, issuer.full_name)
+    issuer_display_name = get_display_name(issuer)
+    register_user(issuer.id, issuer.username, issuer_display_name)
     issuer_role = get_user_role(issuer.username)
 
     if not can_reset_stats(issuer_role):
@@ -888,7 +908,7 @@ async def reset_accepted_command(update: Update, context: ContextTypes.DEFAULT_T
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
         target_user_id = target_user.id
-        target_user_name = target_user.full_name
+        target_user_name = get_display_name(target_user)
         target_username = target_user.username or str(target_user_id)
         register_user(target_user_id, target_user.username, target_user_name)
     else:
@@ -907,7 +927,7 @@ async def reset_accepted_command(update: Update, context: ContextTypes.DEFAULT_T
                 if entity.type == "text_mention":
                     target_user = entity.user
                     target_user_id = target_user.id
-                    target_user_name = target_user.full_name
+                    target_user_name = get_display_name(target_user)
                     target_username = target_user.username or str(target_user_id)
                     register_user(target_user_id, target_user.username, target_user_name)
                     break
@@ -936,7 +956,7 @@ async def reset_accepted_command(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     if not target_user_name or target_user_name == "None":
-        target_user_name = f"@{target_username}"
+        target_user_name = f"@{target_username}" if target_username else f"User_{target_user_id}"
 
     stats = load_stats()
     user_key = str(target_user_id)
@@ -960,7 +980,8 @@ async def reset_rejected_command(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     issuer = message.from_user
-    register_user(issuer.id, issuer.username, issuer.full_name)
+    issuer_display_name = get_display_name(issuer)
+    register_user(issuer.id, issuer.username, issuer_display_name)
     issuer_role = get_user_role(issuer.username)
 
     if not can_reset_stats(issuer_role):
@@ -975,7 +996,7 @@ async def reset_rejected_command(update: Update, context: ContextTypes.DEFAULT_T
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
         target_user_id = target_user.id
-        target_user_name = target_user.full_name
+        target_user_name = get_display_name(target_user)
         target_username = target_user.username or str(target_user_id)
         register_user(target_user_id, target_user.username, target_user_name)
     else:
@@ -994,7 +1015,7 @@ async def reset_rejected_command(update: Update, context: ContextTypes.DEFAULT_T
                 if entity.type == "text_mention":
                     target_user = entity.user
                     target_user_id = target_user.id
-                    target_user_name = target_user.full_name
+                    target_user_name = get_display_name(target_user)
                     target_username = target_user.username or str(target_user_id)
                     register_user(target_user_id, target_user.username, target_user_name)
                     break
@@ -1023,7 +1044,7 @@ async def reset_rejected_command(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     if not target_user_name or target_user_name == "None":
-        target_user_name = f"@{target_username}"
+        target_user_name = f"@{target_username}" if target_username else f"User_{target_user_id}"
 
     stats = load_stats()
     user_key = str(target_user_id)
@@ -1056,7 +1077,8 @@ async def handle_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     sender = message.from_user
-    register_user(sender.id, sender.username, sender.full_name)
+    sender_display_name = get_display_name(sender)
+    register_user(sender.id, sender.username, sender_display_name)
     sender_role = get_user_role(sender.username)
     expected_category = get_report_category(sender_role)
 
@@ -1105,7 +1127,7 @@ async def handle_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'photo': photo,
             'caption': caption,
             'sender_id': sender.id,
-            'sender_name': sender.full_name,
+            'sender_name': sender_display_name,
             'sender_role': sender_role.name if sender_role else 'Неизвестна',
             'category': category,
             'original_message_id': message.message_id,
@@ -1123,7 +1145,8 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
     report_id = parts[2]
 
     checker = query.from_user
-    register_user(checker.id, checker.username, checker.full_name)
+    checker_display_name = get_display_name(checker)
+    register_user(checker.id, checker.username, checker_display_name)
     checker_role = get_user_role(checker.username)
 
     if not can_check_report(checker_role, category):
@@ -1153,7 +1176,7 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
         f"🎖 Роль: {report['sender_role']}\n"
         f"📊 Принятых отчетов: {updated_stats['accepted']}\n"
         f"📊 Отклоненных отчетов: {updated_stats['rejected']}\n"
-        f"👨‍💼 Проверил: {checker.full_name} (@{checker.username})\n"
+        f"👨‍💼 Проверил: {checker_display_name} (@{checker.username})\n"
         f"🎖 Роль проверяющего: {checker_role.name}\n"
         f"📝 Детали:\n{report['caption']}"
     )
@@ -1180,8 +1203,8 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
     del reports_data[report_key]
 
 def main():
-    logger.info("🚀 Запуск бота - ИСПРАВЛЕН /stats 'Group' баг")
-    logger.info("✅ Username как fallback для ВСЕХ команд")
+    logger.info("🚀 ФИНАЛЬНАЯ ВЕРСИЯ - get_display_name() для ВСЕХ команд")
+    logger.info("✅ Гарантия отображения имени: full_name → first_name → @username → User_ID")
     logger.info(f"👥 Пользователей: {len(USERS_ROLES)}")
 
     application = Application.builder().token(BOT_TOKEN).build()

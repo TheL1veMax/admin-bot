@@ -398,12 +398,17 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         break
 
             if target_user_id is None:
-                stats = load_stats()
-                for uid, data in stats.items():
-                    if data.get('name', '').lower() == target_username.lower():
-                        target_user_id = int(uid)
-                        target_user_name = data.get('name')
-                        break
+                found_id, found_name = find_user_id_by_username(target_username)
+                if found_id is not None:
+                    target_user_id = found_id
+                    target_user_name = found_name if found_name else f"@{target_username}"
+                else:
+                    stats = load_stats()
+                    for uid, data in stats.items():
+                        if data.get('name', '').lower() == target_username.lower():
+                            target_user_id = int(uid)
+                            target_user_name = data.get('name', f"@{target_username}")
+                            break
 
             if target_user_id is None:
                 error_msg = await message.reply_text(f"❌ @{target_username} не найден!")
@@ -412,7 +417,10 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             target_user_id = user.id
             target_user_name = user.full_name
-            target_username = user.username
+            target_username = user.username or str(user.id)
+
+    if not target_user_name or target_user_name == "None":
+        target_user_name = f"@{target_username}"
 
     user_stats = get_user_stats(target_user_id)
     target_role = get_user_role(target_username)
@@ -914,7 +922,7 @@ async def reset_accepted_command(update: Update, context: ContextTypes.DEFAULT_T
                 for uid, data in stats.items():
                     if data.get('name', '').lower() == target_username.lower():
                         target_user_id = int(uid)
-                        target_user_name = data.get('name')
+                        target_user_name = data.get('name', f"@{target_username}")
                         break
 
                 if target_user_id is None:
@@ -1001,7 +1009,7 @@ async def reset_rejected_command(update: Update, context: ContextTypes.DEFAULT_T
                 for uid, data in stats.items():
                     if data.get('name', '').lower() == target_username.lower():
                         target_user_id = int(uid)
-                        target_user_name = data.get('name')
+                        target_user_name = data.get('name', f"@{target_username}")
                         break
 
                 if target_user_id is None:
@@ -1172,8 +1180,8 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
     del reports_data[report_key]
 
 def main():
-    logger.info("🚀 Запуск бота - ФИНАЛЬНАЯ ВЕРСИЯ")
-    logger.info("✅ Проблема 'Group' исправлена - username как fallback")
+    logger.info("🚀 Запуск бота - ИСПРАВЛЕН /stats 'Group' баг")
+    logger.info("✅ Username как fallback для ВСЕХ команд")
     logger.info(f"👥 Пользователей: {len(USERS_ROLES)}")
 
     application = Application.builder().token(BOT_TOKEN).build()

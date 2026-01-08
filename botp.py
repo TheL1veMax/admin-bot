@@ -62,12 +62,12 @@ USERS_ROLES['anayka_lol'] = Role.МЛ_АДМИН
 USERS_ROLES['ml_admin2'] = Role.МЛ_АДМИН
 USERS_ROLES['matnozdra'] = Role.СТАРШИЙ_МОДЕРАТОР
 USERS_ROLES['st_moder2'] = Role.СТАРШИЙ_МОДЕРАТОР
-USERS_ROLES['breakbrosmiling'] = Role.СТАРШИЙ_МОДЕРАТОР
+USERS_ROLES['breakbrosmiling'] = Role.МОДЕРАТОР
 USERS_ROLES['bosspogranki'] = Role.МОДЕРАТОР
 USERS_ROLES['spearskill'] = Role.МОДЕРАТОР
 USERS_ROLES['neverexikid'] = Role.МОДЕРАТОР
 USERS_ROLES['finn_wolfhard1223'] = Role.МОДЕРАТОР
-USERS_ROLES['miwa123009'] = Role.СТАРШИЙ_МОДЕРАТОР
+USERS_ROLES['miwa123009'] = Role.МОДЕРАТОР
 USERS_ROLES['sportaisam'] = Role.МОДЕРАТОР
 USERS_ROLES['rusich_group35'] = Role.МОДЕРАТОР
 USERS_ROLES['za_spartakmsk'] = Role.МОДЕРАТОР
@@ -482,7 +482,8 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = message.text.strip()
     parts = text.split(maxsplit=2)
 
-    if len(parts) >= 3:
+    # ПРИОРИТЕТ 1: Команда с @username в тексте
+    if len(parts) >= 3 and (parts[1].startswith('@') or parts[1].isdigit()):
         target_username = parts[1].lstrip('@')
         reason = parts[2]
 
@@ -506,6 +507,7 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 error_msg = await message.reply_text(f"❌ @{target_username} не найден!\n💡 Попросите написать /start боту")
                 asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
                 return
+    # ПРИОРИТЕТ 2: Reply на сообщение
     elif message.reply_to_message:
         target_user = message.reply_to_message.from_user
 
@@ -523,7 +525,7 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             error_msg = await message.reply_text("❌ Укажите причину!\n/vg причина")
             asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
             return
-        reason = parts[1]
+        reason = ' '.join(parts[1:])
     else:
         error_msg = await message.reply_text("❌ Формат: /vg @username причина")
         asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
@@ -580,7 +582,8 @@ async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_T
     text = message.text.strip()
     parts = text.split(maxsplit=1)
 
-    if len(parts) >= 2:
+    # ПРИОРИТЕТ 1: @username в тексте команды
+    if len(parts) >= 2 and (parts[1].startswith('@') or parts[1].replace('@', '').isdigit()):
         target_username = parts[1].lstrip('@')
 
         if message.entities:
@@ -603,6 +606,7 @@ async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_T
                 error_msg = await message.reply_text(f"❌ @{target_username} не найден!")
                 asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
                 return
+    # ПРИОРИТЕТ 2: Reply на сообщение
     elif message.reply_to_message:
         target_user = message.reply_to_message.from_user
 
@@ -669,7 +673,8 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = message.text.strip()
     parts = text.split(maxsplit=3)
 
-    if len(parts) >= 4:
+    # ПРИОРИТЕТ 1: Команда с @username в тексте
+    if len(parts) >= 4 and (parts[1].startswith('@') or parts[1].isdigit()):
         target_username = parts[1].lstrip('@')
 
         try:
@@ -703,6 +708,7 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 error_msg = await message.reply_text(f"❌ @{target_username} не найден!")
                 asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
                 return
+    # ПРИОРИТЕТ 2: Reply на сообщение
     elif message.reply_to_message:
         target_user = message.reply_to_message.from_user
 
@@ -782,7 +788,8 @@ async def unblacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     text = message.text.strip()
     parts = text.split(maxsplit=1)
 
-    if len(parts) >= 2:
+    # ПРИОРИТЕТ 1: @username в тексте
+    if len(parts) >= 2 and (parts[1].startswith('@') or parts[1].replace('@', '').isdigit()):
         target_username = parts[1].lstrip('@')
 
         if message.entities:
@@ -805,6 +812,7 @@ async def unblacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE
                 error_msg = await message.reply_text(f"❌ @{target_username} не найден!")
                 asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
                 return
+    # ПРИОРИТЕТ 2: Reply на сообщение
     elif message.reply_to_message:
         target_user = message.reply_to_message.from_user
 
@@ -864,7 +872,8 @@ async def reset_accepted_command(update: Update, context: ContextTypes.DEFAULT_T
     text = message.text.strip()
     parts = text.split(maxsplit=1)
 
-    if len(parts) >= 2:
+    # ПРИОРИТЕТ 1: @username в тексте
+    if len(parts) >= 2 and (parts[1].startswith('@') or parts[1].replace('@', '').isdigit()):
         target_username = parts[1].lstrip('@')
 
         if message.entities:
@@ -887,6 +896,7 @@ async def reset_accepted_command(update: Update, context: ContextTypes.DEFAULT_T
                 error_msg = await message.reply_text(f"❌ @{target_username} не найден!")
                 asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
                 return
+    # ПРИОРИТЕТ 2: Reply на сообщение
     elif message.reply_to_message:
         target_user = message.reply_to_message.from_user
 
@@ -942,7 +952,8 @@ async def reset_rejected_command(update: Update, context: ContextTypes.DEFAULT_T
     text = message.text.strip()
     parts = text.split(maxsplit=1)
 
-    if len(parts) >= 2:
+    # ПРИОРИТЕТ 1: @username в тексте
+    if len(parts) >= 2 and (parts[1].startswith('@') or parts[1].replace('@', '').isdigit()):
         target_username = parts[1].lstrip('@')
 
         if message.entities:
@@ -965,6 +976,7 @@ async def reset_rejected_command(update: Update, context: ContextTypes.DEFAULT_T
                 error_msg = await message.reply_text(f"❌ @{target_username} не найден!")
                 asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
                 return
+    # ПРИОРИТЕТ 2: Reply на сообщение
     elif message.reply_to_message:
         target_user = message.reply_to_message.from_user
 
@@ -1139,7 +1151,7 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
     del reports_data[report_key]
 
 def main():
-    logger.info("🚀 Bot started - Text parsing priority fixed!")
+    logger.info("🚀 Bot started - Text parsing PRIORITY fixed for ALL commands!")
 
     application = Application.builder().token(BOT_TOKEN).build()
 
@@ -1159,4 +1171,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

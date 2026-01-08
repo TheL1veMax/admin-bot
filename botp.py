@@ -62,12 +62,12 @@ USERS_ROLES['anayka_lol'] = Role.МЛ_АДМИН
 USERS_ROLES['ml_admin2'] = Role.МЛ_АДМИН
 USERS_ROLES['matnozdra'] = Role.СТАРШИЙ_МОДЕРАТОР
 USERS_ROLES['st_moder2'] = Role.СТАРШИЙ_МОДЕРАТОР
-USERS_ROLES['breakbrosmiling'] = Role.МОДЕРАТОР
+USERS_ROLES['breakbrosmiling'] = Role.СТАРШИЙ_МОДЕРАТОР
 USERS_ROLES['bosspogranki'] = Role.МОДЕРАТОР
 USERS_ROLES['spearskill'] = Role.МОДЕРАТОР
 USERS_ROLES['neverexikid'] = Role.МОДЕРАТОР
 USERS_ROLES['finn_wolfhard1223'] = Role.МОДЕРАТОР
-USERS_ROLES['miwa123009'] = Role.МОДЕРАТОР
+USERS_ROLES['miwa123009'] = Role.СТАРШИЙ_МОДЕРАТОР
 USERS_ROLES['sportaisam'] = Role.МОДЕРАТОР
 USERS_ROLES['rusich_group35'] = Role.МОДЕРАТОР
 USERS_ROLES['za_spartakmsk'] = Role.МОДЕРАТОР
@@ -1159,3 +1159,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

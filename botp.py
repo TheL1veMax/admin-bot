@@ -2,17 +2,20 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 import logging
 from enum import IntEnum
-import json
 import os
 import asyncio
 import time
 from datetime import datetime, timedelta
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from contextlib import contextmanager
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = '8275792067:AAFkuxFjLrpsvInoheghSYIenRIqVLiBfCM'
 GROUP_CHAT_ID = -1002418857530
+DATABASE_URL = os.getenv('DATABASE_URL')
 
 MODERATOR_REPORT_TOPIC_ID = 14
 ADMIN_REPORT_TOPIC_ID = 13
@@ -22,14 +25,6 @@ ACCEPTED_ADMIN_TOPIC_ID = 17854
 REJECTED_ADMIN_TOPIC_ID = 17856
 WARNINGS_TOPIC_ID = 2976
 BLACKLIST_TOPIC_ID = 3680
-
-DATA_DIR = '/app/data'
-os.makedirs(DATA_DIR, exist_ok=True)
-
-STATS_FILE = os.path.join(DATA_DIR, 'report_stats.json')
-WARNINGS_FILE = os.path.join(DATA_DIR, 'warnings_data.json')
-BLACKLIST_FILE = os.path.join(DATA_DIR, 'blacklist_data.json')
-USER_IDS_FILE = os.path.join(DATA_DIR, 'user_ids.json')
 
 DELETE_AFTER_SECONDS = 60
 STATS_COOLDOWN = 10
@@ -49,216 +44,277 @@ class Role(IntEnum):
     СТАРШИЙ_МОДЕРАТОР = 1
     МОДЕРАТОР = 0
 
-USERS_ROLES = {}
-USERS_ROLES['glavnyy_admin'] = Role.ГЛАВНЫЙ_АДМИН
-USERS_ROLES['gerrinetwork'] = Role.СЗА
-USERS_ROLES['the_pr1estesss'] = Role.ЗАМ_ГЛАВНОГО
-USERS_ROLES['qwertyuiopasdfghjklzxcvbnm123411'] = Role.СТАРШИЙ_АДМИН
-USERS_ROLES['mskmboky'] = Role.СТАРШИЙ_АДМИН
-USERS_ROLES['whysparky'] = Role.СЗМ
-USERS_ROLES['maga8c'] = Role.АДМИН
-USERS_ROLES['admin_user2'] = Role.АДМИН
-USERS_ROLES['anayka_lol'] = Role.МЛ_АДМИН
-USERS_ROLES['ml_admin2'] = Role.МЛ_АДМИН
-USERS_ROLES['matnozdra'] = Role.СТАРШИЙ_МОДЕРАТОР
-USERS_ROLES['st_moder2'] = Role.СТАРШИЙ_МОДЕРАТОР
-USERS_ROLES['breakbrosmiling'] = Role.МОДЕРАТОР
-USERS_ROLES['bosspogranki'] = Role.МОДЕРАТОР
-USERS_ROLES['spearskill'] = Role.МОДЕРАТОР
-USERS_ROLES['neverexikid'] = Role.МОДЕРАТОР
-USERS_ROLES['finn_wolfhard1223'] = Role.МОДЕРАТОР
-USERS_ROLES['miwa123009'] = Role.МОДЕРАТОР
-USERS_ROLES['sportaisam'] = Role.МОДЕРАТОР
-USERS_ROLES['rusich_group35'] = Role.МОДЕРАТОР
-USERS_ROLES['za_spartakmsk'] = Role.МОДЕРАТОР
+USERS_ROLES = {
+    'glavnyy_admin': Role.ГЛАВНЫЙ_АДМИН,
+    'gerrinetwork': Role.СЗА,
+    'the_pr1estesss': Role.ЗАМ_ГЛАВНОГО,
+    'qwertyuiopasdfghjklzxcvbnm123411': Role.СТАРШИЙ_АДМИН,
+    'mskmboky': Role.СТАРШИЙ_АДМИН,
+    'whysparky': Role.СЗМ,
+    'maga8c': Role.АДМИН,
+    'admin_user2': Role.АДМИН,
+    'anayka_lol': Role.МЛ_АДМИН,
+    'ml_admin2': Role.МЛ_АДМИН,
+    'matnozdra': Role.СТАРШИЙ_МОДЕРАТОР,
+    'st_moder2': Role.СТАРШИЙ_МОДЕРАТОР,
+    'breakbrosmiling': Role.МОДЕРАТОР,
+    'bosspogranki': Role.МОДЕРАТОР,
+    'spearskill': Role.МОДЕРАТОР,
+    'neverexikid': Role.МОДЕРАТОР,
+    'finn_wolfhard1223': Role.МОДЕРАТОР,
+    'miwa123009': Role.МОДЕРАТОР,
+    'sportaisam': Role.МОДЕРАТОР,
+    'rusich_group35': Role.МОДЕРАТОР,
+    'za_spartakmsk': Role.МОДЕРАТОР
+}
 
 reports_data = {}
+
+@contextmanager
+def get_db_connection():
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        yield conn
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Database error: {e}")
+        raise
+    finally:
+        conn.close()
+
+def init_database():
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id BIGINT PRIMARY KEY,
+                    username VARCHAR(255),
+                    full_name VARCHAR(255),
+                    last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS report_stats (
+                    user_id BIGINT PRIMARY KEY,
+                    username VARCHAR(255),
+                    full_name VARCHAR(255),
+                    accepted INTEGER DEFAULT 0,
+                    rejected INTEGER DEFAULT 0
+                )
+            """)
+
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS warnings (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    username VARCHAR(255),
+                    full_name VARCHAR(255),
+                    reason TEXT,
+                    issued_by VARCHAR(255),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    active BOOLEAN DEFAULT TRUE
+                )
+            """)
+
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS blacklist (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    username VARCHAR(255),
+                    full_name VARCHAR(255),
+                    days INTEGER,
+                    reason TEXT,
+                    issued_by VARCHAR(255),
+                    start_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    end_date TIMESTAMP,
+                    active BOOLEAN DEFAULT TRUE
+                )
+            """)
+
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_warnings_user_id ON warnings(user_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_warnings_active ON warnings(active)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_blacklist_user_id ON blacklist(user_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_blacklist_active ON blacklist(active)")
 
 def get_display_name(user):
     if hasattr(user, 'full_name') and user.full_name:
         name_str = str(user.full_name).strip()
         if name_str and name_str.lower() not in ['none', 'null', '', 'group']:
             return name_str
-
     if hasattr(user, 'first_name') and user.first_name:
         name_str = str(user.first_name).strip()
         if name_str and name_str.lower() not in ['none', 'null', '', 'group']:
             return name_str
-
     if hasattr(user, 'username') and user.username:
         return f"@{user.username}"
-
     return f"User_{user.id}"
-
-def load_user_ids():
-    if os.path.exists(USER_IDS_FILE):
-        try:
-            with open(USER_IDS_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception as e:
-            logger.error(f"Ошибка загрузки user_ids: {e}")
-    return {}
-
-def save_user_ids(user_ids):
-    try:
-        with open(USER_IDS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(user_ids, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        logger.error(f"Ошибка сохранения user_ids: {e}")
 
 def register_user(user_id: int, username: str, full_name: str):
     if not username:
-        logger.warning(f"No username: {user_id} - {full_name}")
         return
-    user_ids = load_user_ids()
-    clean_username = username.lower()
-    user_ids[clean_username] = {
-        'user_id': user_id,
-        'username': username,
-        'full_name': full_name,
-        'last_seen': str(time.time())
-    }
-    save_user_ids(user_ids)
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO users (user_id, username, full_name, last_seen)
+                    VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (user_id) DO UPDATE
+                    SET username = EXCLUDED.username,
+                        full_name = EXCLUDED.full_name,
+                        last_seen = CURRENT_TIMESTAMP
+                """, (user_id, username.lower(), full_name))
+    except Exception as e:
+        logger.error(f"Register user error: {e}")
 
 def find_user_id_by_username(username: str):
-    user_ids = load_user_ids()
-    clean_username = username.lower()
-    if clean_username in user_ids:
-        user_data = user_ids[clean_username]
-        return user_data['user_id'], user_data.get('full_name')
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT user_id, full_name FROM users
+                    WHERE LOWER(username) = LOWER(%s)
+                """, (username,))
+                result = cur.fetchone()
+                if result:
+                    return result['user_id'], result['full_name']
+    except Exception as e:
+        logger.error(f"Find user error: {e}")
     return None, None
 
-def load_stats():
-    if os.path.exists(STATS_FILE):
-        try:
-            with open(STATS_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception as e:
-            logger.error(f"Ошибка загрузки статистики: {e}")
-    return {}
-
-def save_stats(stats):
-    try:
-        with open(STATS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(stats, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        logger.error(f"Ошибка сохранения статистики: {e}")
-
 def get_user_stats(user_id: int):
-    stats = load_stats()
-    user_key = str(user_id)
-    if user_key not in stats:
-        stats[user_key] = {'accepted': 0, 'rejected': 0, 'name': ''}
-    return stats[user_key]
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT accepted, rejected, full_name FROM report_stats
+                    WHERE user_id = %s
+                """, (user_id,))
+                result = cur.fetchone()
+                if result:
+                    return {
+                        'accepted': result['accepted'],
+                        'rejected': result['rejected'],
+                        'name': result['full_name']
+                    }
+    except Exception as e:
+        logger.error(f"Get stats error: {e}")
+    return {'accepted': 0, 'rejected': 0, 'name': ''}
 
 def update_user_stats(user_id: int, user_name: str, action: str):
-    stats = load_stats()
-    user_key = str(user_id)
-    if user_key not in stats:
-        stats[user_key] = {'accepted': 0, 'rejected': 0, 'name': user_name}
-    stats[user_key]['name'] = user_name
-    if action == 'accept':
-        stats[user_key]['accepted'] += 1
-    elif action == 'reject':
-        stats[user_key]['rejected'] += 1
-    save_stats(stats)
-    return stats[user_key]
-
-def load_warnings():
-    if os.path.exists(WARNINGS_FILE):
-        try:
-            with open(WARNINGS_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception as e:
-            logger.error(f"Ошибка загрузки выговоров: {e}")
-    return {}
-
-def save_warnings(warnings):
     try:
-        with open(WARNINGS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(warnings, f, ensure_ascii=False, indent=2)
+        with get_db_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    INSERT INTO report_stats (user_id, full_name, accepted, rejected)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (user_id) DO UPDATE
+                    SET accepted = report_stats.accepted + EXCLUDED.accepted,
+                        rejected = report_stats.rejected + EXCLUDED.rejected,
+                        full_name = EXCLUDED.full_name
+                    RETURNING accepted, rejected
+                """, (
+                    user_id, 
+                    user_name,
+                    1 if action == 'accept' else 0,
+                    1 if action == 'reject' else 0
+                ))
+                result = cur.fetchone()
+                return {
+                    'accepted': result['accepted'],
+                    'rejected': result['rejected'],
+                    'name': user_name
+                }
     except Exception as e:
-        logger.error(f"Ошибка сохранения выговоров: {e}")
+        logger.error(f"Update stats error: {e}")
+        return {'accepted': 0, 'rejected': 0, 'name': user_name}
 
 def add_warning(user_id: int, user_name: str, username: str, reason: str, issued_by: str):
-    warnings = load_warnings()
-    user_key = str(user_id)
-    if user_key not in warnings:
-        warnings[user_key] = {'count': 0, 'name': user_name, 'username': username, 'history': []}
-    warnings[user_key]['count'] += 1
-    warnings[user_key]['name'] = user_name
-    warnings[user_key]['username'] = username
-    warnings[user_key]['history'].append({
-        'reason': reason,
-        'issued_by': issued_by,
-        'timestamp': str(time.time()),
-        'action': 'added'
-    })
-    save_warnings(warnings)
-    return warnings[user_key]['count']
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO warnings (user_id, username, full_name, reason, issued_by)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (user_id, username, user_name, reason, issued_by))
+
+                cur.execute("""
+                    SELECT COUNT(*) FROM warnings
+                    WHERE user_id = %s AND active = TRUE
+                """, (user_id,))
+                count = cur.fetchone()[0]
+                return count
+    except Exception as e:
+        logger.error(f"Add warning error: {e}")
+        return 0
 
 def remove_warning(user_id: int, removed_by: str):
-    warnings = load_warnings()
-    user_key = str(user_id)
-    if user_key not in warnings or warnings[user_key]['count'] == 0:
-        return None
-    warnings[user_key]['count'] -= 1
-    warnings[user_key]['history'].append({
-        'reason': 'Выговор снят',
-        'issued_by': removed_by,
-        'timestamp': str(time.time()),
-        'action': 'removed'
-    })
-    save_warnings(warnings)
-    return warnings[user_key]['count']
-
-def load_blacklist():
-    if os.path.exists(BLACKLIST_FILE):
-        try:
-            with open(BLACKLIST_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception as e:
-            logger.error(f"Ошибка загрузки ЧС: {e}")
-    return {}
-
-def save_blacklist(blacklist):
     try:
-        with open(BLACKLIST_FILE, 'w', encoding='utf-8') as f:
-            json.dump(blacklist, f, ensure_ascii=False, indent=2)
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id FROM warnings
+                    WHERE user_id = %s AND active = TRUE
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """, (user_id,))
+                result = cur.fetchone()
+
+                if not result:
+                    return None
+
+                warning_id = result[0]
+                cur.execute("UPDATE warnings SET active = FALSE WHERE id = %s", (warning_id,))
+
+                cur.execute("""
+                    SELECT COUNT(*) FROM warnings
+                    WHERE user_id = %s AND active = TRUE
+                """, (user_id,))
+                count = cur.fetchone()[0]
+                return count
     except Exception as e:
-        logger.error(f"Ошибка сохранения ЧС: {e}")
+        logger.error(f"Remove warning error: {e}")
+        return None
 
 def add_to_blacklist(user_id: int, user_name: str, username: str, days: int, reason: str, issued_by: str):
-    blacklist = load_blacklist()
-    user_key = str(user_id)
-    start_date = datetime.now()
-    end_date = start_date + timedelta(days=days)
-    entry = {
-        'name': user_name,
-        'username': username,
-        'days': days,
-        'reason': reason,
-        'issued_by': issued_by,
-        'start_date': start_date.isoformat(),
-        'end_date': end_date.isoformat(),
-        'active': True
-    }
-    if user_key not in blacklist:
-        blacklist[user_key] = {'history': []}
-    blacklist[user_key]['current'] = entry
-    blacklist[user_key]['history'].append(entry)
-    save_blacklist(blacklist)
-    return entry
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                end_date = datetime.now() + timedelta(days=days)
+
+                cur.execute("UPDATE blacklist SET active = FALSE WHERE user_id = %s AND active = TRUE", (user_id,))
+
+                cur.execute("""
+                    INSERT INTO blacklist 
+                    (user_id, username, full_name, days, reason, issued_by, end_date)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id, start_date, end_date
+                """, (user_id, username, user_name, days, reason, issued_by, end_date))
+
+                result = cur.fetchone()
+                return {
+                    'name': user_name,
+                    'username': username,
+                    'days': days,
+                    'reason': reason,
+                    'issued_by': issued_by,
+                    'start_date': result['start_date'].isoformat(),
+                    'end_date': result['end_date'].isoformat()
+                }
+    except Exception as e:
+        logger.error(f"Add blacklist error: {e}")
+        return None
 
 def remove_from_blacklist(user_id: int):
-    blacklist = load_blacklist()
-    user_key = str(user_id)
-    if user_key in blacklist and 'current' in blacklist[user_key]:
-        blacklist[user_key]['current']['active'] = False
-        del blacklist[user_key]['current']
-        save_blacklist(blacklist)
-        return True
-    return False
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE blacklist SET active = FALSE WHERE user_id = %s AND active = TRUE", (user_id,))
+                return cur.rowcount > 0
+    except Exception as e:
+        logger.error(f"Remove blacklist error: {e}")
+        return False
 
 async def delete_messages_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_ids: list, delay: int):
     await asyncio.sleep(delay)
@@ -268,13 +324,13 @@ async def delete_messages_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_i
         except Exception as e:
             logger.error(f"Failed to delete {msg_id}: {e}")
 
-def get_user_role(username: str) -> Role:
+def get_user_role(username: str):
     if not username:
         return None
     clean_username = username.strip().lstrip('@').lower()
     return USERS_ROLES.get(clean_username)
 
-def can_check_report(checker_role: Role, report_type: str) -> bool:
+def can_check_report(checker_role, report_type: str):
     if checker_role is None:
         return False
     if checker_role >= Role.СЗА:
@@ -285,22 +341,22 @@ def can_check_report(checker_role: Role, report_type: str) -> bool:
         return True
     return False
 
-def can_issue_warning(user_role: Role) -> bool:
+def can_issue_warning(user_role):
     return user_role is not None and user_role >= Role.СЗМ
 
-def can_remove_warning(user_role: Role) -> bool:
+def can_remove_warning(user_role):
     return user_role is not None and user_role >= Role.СЗМ
 
-def can_manage_blacklist(user_role: Role) -> bool:
+def can_manage_blacklist(user_role):
     return user_role is not None and user_role >= Role.СЗМ
 
-def can_view_others_stats(user_role: Role) -> bool:
+def can_view_others_stats(user_role):
     return user_role is not None and user_role >= Role.СЗМ
 
-def can_reset_stats(user_role: Role) -> bool:
+def can_reset_stats(user_role):
     return user_role is not None and user_role >= Role.СЗМ
 
-def get_report_category(user_role: Role) -> str:
+def get_report_category(user_role):
     if user_role is None:
         return None
     if user_role >= Role.СЗА:
@@ -311,7 +367,7 @@ def get_report_category(user_role: Role) -> str:
         return 'admin'
     return None
 
-def get_topic_ids_for_category(category: str) -> dict:
+def get_topic_ids_for_category(category: str):
     if category == 'moderator':
         return {
             'report': MODERATOR_REPORT_TOPIC_ID,
@@ -326,7 +382,7 @@ def get_topic_ids_for_category(category: str) -> dict:
         }
     return None
 
-def get_checkers_usernames(category: str) -> list:
+def get_checkers_usernames(category: str):
     if category == 'moderator':
         return [username for username, role in USERS_ROLES.items() 
                 if Role.АДМИН <= role < Role.ГЛАВНЫЙ_АДМИН]
@@ -482,7 +538,6 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = message.text.strip()
     parts = text.split(maxsplit=2)
 
-    # ПРИОРИТЕТ 1: Команда с @username в тексте
     if len(parts) >= 3 and (parts[1].startswith('@') or parts[1].isdigit()):
         target_username = parts[1].lstrip('@')
         reason = parts[2]
@@ -507,7 +562,6 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 error_msg = await message.reply_text(f"❌ @{target_username} не найден!\n💡 Попросите написать /start боту")
                 asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
                 return
-    # ПРИОРИТЕТ 2: Reply на сообщение
     elif message.reply_to_message:
         target_user = message.reply_to_message.from_user
 
@@ -582,7 +636,6 @@ async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_T
     text = message.text.strip()
     parts = text.split(maxsplit=1)
 
-    # ПРИОРИТЕТ 1: @username в тексте команды
     if len(parts) >= 2 and (parts[1].startswith('@') or parts[1].replace('@', '').isdigit()):
         target_username = parts[1].lstrip('@')
 
@@ -606,7 +659,6 @@ async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_T
                 error_msg = await message.reply_text(f"❌ @{target_username} не найден!")
                 asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
                 return
-    # ПРИОРИТЕТ 2: Reply на сообщение
     elif message.reply_to_message:
         target_user = message.reply_to_message.from_user
 
@@ -673,7 +725,6 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = message.text.strip()
     parts = text.split(maxsplit=3)
 
-    # ПРИОРИТЕТ 1: Команда с @username в тексте
     if len(parts) >= 4 and (parts[1].startswith('@') or parts[1].isdigit()):
         target_username = parts[1].lstrip('@')
 
@@ -708,7 +759,6 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 error_msg = await message.reply_text(f"❌ @{target_username} не найден!")
                 asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
                 return
-    # ПРИОРИТЕТ 2: Reply на сообщение
     elif message.reply_to_message:
         target_user = message.reply_to_message.from_user
 
@@ -788,7 +838,6 @@ async def unblacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     text = message.text.strip()
     parts = text.split(maxsplit=1)
 
-    # ПРИОРИТЕТ 1: @username в тексте
     if len(parts) >= 2 and (parts[1].startswith('@') or parts[1].replace('@', '').isdigit()):
         target_username = parts[1].lstrip('@')
 
@@ -812,7 +861,6 @@ async def unblacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE
                 error_msg = await message.reply_text(f"❌ @{target_username} не найден!")
                 asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
                 return
-    # ПРИОРИТЕТ 2: Reply на сообщение
     elif message.reply_to_message:
         target_user = message.reply_to_message.from_user
 
@@ -872,7 +920,6 @@ async def reset_accepted_command(update: Update, context: ContextTypes.DEFAULT_T
     text = message.text.strip()
     parts = text.split(maxsplit=1)
 
-    # ПРИОРИТЕТ 1: @username в тексте
     if len(parts) >= 2 and (parts[1].startswith('@') or parts[1].replace('@', '').isdigit()):
         target_username = parts[1].lstrip('@')
 
@@ -896,7 +943,6 @@ async def reset_accepted_command(update: Update, context: ContextTypes.DEFAULT_T
                 error_msg = await message.reply_text(f"❌ @{target_username} не найден!")
                 asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
                 return
-    # ПРИОРИТЕТ 2: Reply на сообщение
     elif message.reply_to_message:
         target_user = message.reply_to_message.from_user
 
@@ -914,17 +960,22 @@ async def reset_accepted_command(update: Update, context: ContextTypes.DEFAULT_T
         asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
         return
 
-    stats = load_stats()
-    user_key = str(target_user_id)
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT accepted FROM report_stats WHERE user_id = %s", (target_user_id,))
+                result = cur.fetchone()
 
-    if user_key not in stats:
-        error_msg = await message.reply_text(f"❌ Не найден в статистике!")
-        asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
+                if not result:
+                    error_msg = await message.reply_text(f"❌ Не найден в статистике!")
+                    asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
+                    return
+
+                old_value = result[0]
+                cur.execute("UPDATE report_stats SET accepted = 0 WHERE user_id = %s", (target_user_id,))
+    except Exception as e:
+        logger.error(f"Reset accepted error: {e}")
         return
-
-    old_value = stats[user_key].get('accepted', 0)
-    stats[user_key]['accepted'] = 0
-    save_stats(stats)
 
     user_link = f"<a href='tg://user?id={target_user_id}'>{target_user_name}</a>"
     success_msg = await message.reply_text(f"✅ Принятые сброшены\n{user_link}: {old_value} → 0", parse_mode='HTML')
@@ -952,7 +1003,6 @@ async def reset_rejected_command(update: Update, context: ContextTypes.DEFAULT_T
     text = message.text.strip()
     parts = text.split(maxsplit=1)
 
-    # ПРИОРИТЕТ 1: @username в тексте
     if len(parts) >= 2 and (parts[1].startswith('@') or parts[1].replace('@', '').isdigit()):
         target_username = parts[1].lstrip('@')
 
@@ -976,7 +1026,6 @@ async def reset_rejected_command(update: Update, context: ContextTypes.DEFAULT_T
                 error_msg = await message.reply_text(f"❌ @{target_username} не найден!")
                 asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
                 return
-    # ПРИОРИТЕТ 2: Reply на сообщение
     elif message.reply_to_message:
         target_user = message.reply_to_message.from_user
 
@@ -994,17 +1043,22 @@ async def reset_rejected_command(update: Update, context: ContextTypes.DEFAULT_T
         asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
         return
 
-    stats = load_stats()
-    user_key = str(target_user_id)
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT rejected FROM report_stats WHERE user_id = %s", (target_user_id,))
+                result = cur.fetchone()
 
-    if user_key not in stats:
-        error_msg = await message.reply_text(f"❌ Не найден в статистике!")
-        asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
+                if not result:
+                    error_msg = await message.reply_text(f"❌ Не найден в статистике!")
+                    asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
+                    return
+
+                old_value = result[0]
+                cur.execute("UPDATE report_stats SET rejected = 0 WHERE user_id = %s", (target_user_id,))
+    except Exception as e:
+        logger.error(f"Reset rejected error: {e}")
         return
-
-    old_value = stats[user_key].get('rejected', 0)
-    stats[user_key]['rejected'] = 0
-    save_stats(stats)
 
     user_link = f"<a href='tg://user?id={target_user_id}'>{target_user_name}</a>"
     success_msg = await message.reply_text(f"✅ Отклоненные сброшены\n{user_link}: {old_value} → 0", parse_mode='HTML')
@@ -1151,7 +1205,18 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
     del reports_data[report_key]
 
 def main():
-    logger.info("🚀 Bot started - Text parsing PRIORITY fixed for ALL commands!")
+    if not DATABASE_URL:
+        logger.error("❌ DATABASE_URL не задан!")
+        return
+
+    try:
+        init_database()
+        logger.info("✅ База данных инициализирована")
+    except Exception as e:
+        logger.error(f"❌ Ошибка инициализации БД: {e}")
+        return
+
+    logger.info("🚀 Bot started with PostgreSQL!")
 
     application = Application.builder().token(BOT_TOKEN).build()
 
@@ -1166,7 +1231,7 @@ def main():
     application.add_handler(MessageHandler(filters.PHOTO & filters.ChatType.SUPERGROUP, handle_report))
     application.add_handler(CallbackQueryHandler(handle_button_callback))
 
-    logger.info("✅ Bot running!")
+    logger.info("✅ Bot running with PostgreSQL!")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':

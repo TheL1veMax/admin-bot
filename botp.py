@@ -384,10 +384,39 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target_user_name = None
     target_username = None
 
-    if message.reply_to_message:
-        target_user = message.reply_to_message.from_user
+    text = message.text.strip()
+    parts = text.split(maxsplit=1)
 
-        # ФИКС: Если ответ на GroupAnonymousBot - показать свою статистику
+    if len(parts) > 1:
+        if not can_view_others_stats(user_role):
+            error_msg = await message.reply_text("❌ Нет прав!")
+            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
+            return
+
+        target_username = parts[1].lstrip('@')
+
+        if message.entities:
+            for entity in message.entities:
+                if entity.type == "text_mention":
+                    target_user = entity.user
+                    if target_user.id != 1087968824:
+                        target_user_id = target_user.id
+                        target_user_name = get_display_name(target_user)
+                        target_username = target_user.username or str(target_user_id)
+                        register_user(target_user_id, target_user.username, target_user_name)
+                        break
+
+        if target_user_id is None:
+            found_id, _ = find_user_id_by_username(target_username)
+            if found_id is not None:
+                target_user_id = found_id
+                target_user_name = f"@{target_username}"
+            else:
+                error_msg = await message.reply_text(f"❌ @{target_username} не найден!")
+                asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
+                return
+    elif message.reply_to_message:
+        target_user = message.reply_to_message.from_user
         if target_user.id == 1087968824:
             target_user_id = user.id
             target_user_name = user_display_name
@@ -398,41 +427,9 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             target_username = target_user.username or str(target_user_id)
             register_user(target_user_id, target_user.username, target_user_name)
     else:
-        text = message.text.strip()
-        parts = text.split(maxsplit=1)
-
-        if len(parts) > 1:
-            if not can_view_others_stats(user_role):
-                error_msg = await message.reply_text("❌ Нет прав!")
-                asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
-                return
-
-            target_username = parts[1].lstrip('@')
-
-            if message.entities:
-                for entity in message.entities:
-                    if entity.type == "text_mention":
-                        target_user = entity.user
-                        if target_user.id != 1087968824:
-                            target_user_id = target_user.id
-                            target_user_name = get_display_name(target_user)
-                            target_username = target_user.username or str(target_user_id)
-                            register_user(target_user_id, target_user.username, target_user_name)
-                            break
-
-            if target_user_id is None:
-                found_id, _ = find_user_id_by_username(target_username)
-                if found_id is not None:
-                    target_user_id = found_id
-                    target_user_name = f"@{target_username}"
-                else:
-                    error_msg = await message.reply_text(f"❌ @{target_username} не найден!")
-                    asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
-                    return
-        else:
-            target_user_id = user.id
-            target_user_name = user_display_name
-            target_username = user.username or str(user.id)
+        target_user_id = user.id
+        target_user_name = user_display_name
+        target_username = user.username or str(user.id)
 
     user_stats = get_user_stats(target_user_id)
     target_role = get_user_role(target_username) if isinstance(target_username, str) and not target_username.isdigit() else None
@@ -482,36 +479,10 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target_username = None
     reason = None
 
-    if message.reply_to_message:
-        target_user = message.reply_to_message.from_user
+    text = message.text.strip()
+    parts = text.split(maxsplit=2)
 
-        # ФИКС: Блокировка GroupAnonymousBot
-        if target_user.id == 1087968824:
-            error_msg = await message.reply_text("❌ Нельзя выдать выговор анонимному сообщению!")
-            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
-            return
-
-        target_user_id = target_user.id
-        target_user_name = get_display_name(target_user)
-        target_username = target_user.username or str(target_user_id)
-        register_user(target_user_id, target_user.username, target_user_name)
-
-        text = message.text.strip()
-        parts = text.split(maxsplit=1)
-        if len(parts) < 2:
-            error_msg = await message.reply_text("❌ Укажите причину!\n/vg причина")
-            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
-            return
-        reason = parts[1]
-    else:
-        text = message.text.strip()
-        parts = text.split(maxsplit=2)
-
-        if len(parts) < 3:
-            error_msg = await message.reply_text("❌ Формат: /vg @username причина")
-            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
-            return
-
+    if len(parts) >= 3:
         target_username = parts[1].lstrip('@')
         reason = parts[2]
 
@@ -535,6 +506,28 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 error_msg = await message.reply_text(f"❌ @{target_username} не найден!\n💡 Попросите написать /start боту")
                 asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
                 return
+    elif message.reply_to_message:
+        target_user = message.reply_to_message.from_user
+
+        if target_user.id == 1087968824:
+            error_msg = await message.reply_text("❌ Нельзя выдать выговор анонимному сообщению!")
+            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
+            return
+
+        target_user_id = target_user.id
+        target_user_name = get_display_name(target_user)
+        target_username = target_user.username or str(target_user_id)
+        register_user(target_user_id, target_user.username, target_user_name)
+
+        if len(parts) < 2:
+            error_msg = await message.reply_text("❌ Укажите причину!\n/vg причина")
+            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
+            return
+        reason = parts[1]
+    else:
+        error_msg = await message.reply_text("❌ Формат: /vg @username причина")
+        asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
+        return
 
     warning_count = add_warning(target_user_id, target_user_name, target_username or str(target_user_id), reason, issuer.username or issuer_display_name)
     warning_emoji = "⚠️" if warning_count < MAX_WARNINGS else "🚫"
@@ -584,28 +577,10 @@ async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_T
     target_user_name = None
     target_username = None
 
-    if message.reply_to_message:
-        target_user = message.reply_to_message.from_user
+    text = message.text.strip()
+    parts = text.split(maxsplit=1)
 
-        # ФИКС: Блокировка GroupAnonymousBot
-        if target_user.id == 1087968824:
-            error_msg = await message.reply_text("❌ Нельзя снять выговор с анонимного сообщения!")
-            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
-            return
-
-        target_user_id = target_user.id
-        target_user_name = get_display_name(target_user)
-        target_username = target_user.username or str(target_user_id)
-        register_user(target_user_id, target_user.username, target_user_name)
-    else:
-        text = message.text.strip()
-        parts = text.split(maxsplit=1)
-
-        if len(parts) < 2:
-            error_msg = await message.reply_text("❌ Формат: /svg @username")
-            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
-            return
-
+    if len(parts) >= 2:
         target_username = parts[1].lstrip('@')
 
         if message.entities:
@@ -628,6 +603,22 @@ async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_T
                 error_msg = await message.reply_text(f"❌ @{target_username} не найден!")
                 asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
                 return
+    elif message.reply_to_message:
+        target_user = message.reply_to_message.from_user
+
+        if target_user.id == 1087968824:
+            error_msg = await message.reply_text("❌ Нельзя снять выговор с анонимного сообщения!")
+            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
+            return
+
+        target_user_id = target_user.id
+        target_user_name = get_display_name(target_user)
+        target_username = target_user.username or str(target_user_id)
+        register_user(target_user_id, target_user.username, target_user_name)
+    else:
+        error_msg = await message.reply_text("❌ Формат: /svg @username")
+        asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
+        return
 
     new_count = remove_warning(target_user_id, issuer.username or issuer_display_name)
 
@@ -675,47 +666,10 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     days = None
     reason = None
 
-    if message.reply_to_message:
-        target_user = message.reply_to_message.from_user
+    text = message.text.strip()
+    parts = text.split(maxsplit=3)
 
-        # ФИКС: Блокировка GroupAnonymousBot
-        if target_user.id == 1087968824:
-            error_msg = await message.reply_text("❌ Нельзя добавить анонимное сообщение в ЧС!")
-            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
-            return
-
-        target_user_id = target_user.id
-        target_user_name = get_display_name(target_user)
-        target_username = target_user.username or str(target_user_id)
-        register_user(target_user_id, target_user.username, target_user_name)
-
-        text = message.text.strip()
-        parts = text.split(maxsplit=2)
-
-        if len(parts) < 3:
-            error_msg = await message.reply_text("❌ Формат: /bl дни причина")
-            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
-            return
-
-        try:
-            days = int(parts[1])
-            if days <= 0:
-                raise ValueError
-        except ValueError:
-            error_msg = await message.reply_text("❌ Дни - положительное число!")
-            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
-            return
-
-        reason = parts[2]
-    else:
-        text = message.text.strip()
-        parts = text.split(maxsplit=3)
-
-        if len(parts) < 4:
-            error_msg = await message.reply_text("❌ Формат: /bl @username дни причина")
-            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
-            return
-
+    if len(parts) >= 4:
         target_username = parts[1].lstrip('@')
 
         try:
@@ -749,6 +703,40 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 error_msg = await message.reply_text(f"❌ @{target_username} не найден!")
                 asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
                 return
+    elif message.reply_to_message:
+        target_user = message.reply_to_message.from_user
+
+        if target_user.id == 1087968824:
+            error_msg = await message.reply_text("❌ Нельзя добавить анонимное сообщение в ЧС!")
+            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
+            return
+
+        target_user_id = target_user.id
+        target_user_name = get_display_name(target_user)
+        target_username = target_user.username or str(target_user_id)
+        register_user(target_user_id, target_user.username, target_user_name)
+
+        parts = text.split(maxsplit=2)
+
+        if len(parts) < 3:
+            error_msg = await message.reply_text("❌ Формат: /bl дни причина")
+            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
+            return
+
+        try:
+            days = int(parts[1])
+            if days <= 0:
+                raise ValueError
+        except ValueError:
+            error_msg = await message.reply_text("❌ Дни - положительное число!")
+            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
+            return
+
+        reason = parts[2]
+    else:
+        error_msg = await message.reply_text("❌ Формат: /bl @username дни причина")
+        asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
+        return
 
     entry = add_to_blacklist(target_user_id, target_user_name, target_username or str(target_user_id), days, reason, issuer.username or issuer_display_name)
     user_link = f"<a href='tg://user?id={target_user_id}'>{target_user_name}</a>"
@@ -791,28 +779,10 @@ async def unblacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     target_user_name = None
     target_username = None
 
-    if message.reply_to_message:
-        target_user = message.reply_to_message.from_user
+    text = message.text.strip()
+    parts = text.split(maxsplit=1)
 
-        # ФИКС: Блокировка GroupAnonymousBot
-        if target_user.id == 1087968824:
-            error_msg = await message.reply_text("❌ Нельзя убрать анонимное сообщение из ЧС!")
-            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
-            return
-
-        target_user_id = target_user.id
-        target_user_name = get_display_name(target_user)
-        target_username = target_user.username or str(target_user_id)
-        register_user(target_user_id, target_user.username, target_user_name)
-    else:
-        text = message.text.strip()
-        parts = text.split(maxsplit=1)
-
-        if len(parts) < 2:
-            error_msg = await message.reply_text("❌ Формат: /ubl @username")
-            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
-            return
-
+    if len(parts) >= 2:
         target_username = parts[1].lstrip('@')
 
         if message.entities:
@@ -835,6 +805,22 @@ async def unblacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE
                 error_msg = await message.reply_text(f"❌ @{target_username} не найден!")
                 asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
                 return
+    elif message.reply_to_message:
+        target_user = message.reply_to_message.from_user
+
+        if target_user.id == 1087968824:
+            error_msg = await message.reply_text("❌ Нельзя убрать анонимное сообщение из ЧС!")
+            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
+            return
+
+        target_user_id = target_user.id
+        target_user_name = get_display_name(target_user)
+        target_username = target_user.username or str(target_user_id)
+        register_user(target_user_id, target_user.username, target_user_name)
+    else:
+        error_msg = await message.reply_text("❌ Формат: /ubl @username")
+        asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
+        return
 
     removed = remove_from_blacklist(target_user_id)
 
@@ -875,28 +861,10 @@ async def reset_accepted_command(update: Update, context: ContextTypes.DEFAULT_T
     target_user_name = None
     target_username = None
 
-    if message.reply_to_message:
-        target_user = message.reply_to_message.from_user
+    text = message.text.strip()
+    parts = text.split(maxsplit=1)
 
-        # ФИКС: Блокировка GroupAnonymousBot
-        if target_user.id == 1087968824:
-            error_msg = await message.reply_text("❌ Нельзя сбросить статистику анонимного сообщения!")
-            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
-            return
-
-        target_user_id = target_user.id
-        target_user_name = get_display_name(target_user)
-        target_username = target_user.username or str(target_user_id)
-        register_user(target_user_id, target_user.username, target_user_name)
-    else:
-        text = message.text.strip()
-        parts = text.split(maxsplit=1)
-
-        if len(parts) < 2:
-            error_msg = await message.reply_text("❌ Формат: /sp @username")
-            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
-            return
-
+    if len(parts) >= 2:
         target_username = parts[1].lstrip('@')
 
         if message.entities:
@@ -919,6 +887,22 @@ async def reset_accepted_command(update: Update, context: ContextTypes.DEFAULT_T
                 error_msg = await message.reply_text(f"❌ @{target_username} не найден!")
                 asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
                 return
+    elif message.reply_to_message:
+        target_user = message.reply_to_message.from_user
+
+        if target_user.id == 1087968824:
+            error_msg = await message.reply_text("❌ Нельзя сбросить статистику анонимного сообщения!")
+            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
+            return
+
+        target_user_id = target_user.id
+        target_user_name = get_display_name(target_user)
+        target_username = target_user.username or str(target_user_id)
+        register_user(target_user_id, target_user.username, target_user_name)
+    else:
+        error_msg = await message.reply_text("❌ Формат: /sp @username")
+        asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
+        return
 
     stats = load_stats()
     user_key = str(target_user_id)
@@ -955,28 +939,10 @@ async def reset_rejected_command(update: Update, context: ContextTypes.DEFAULT_T
     target_user_name = None
     target_username = None
 
-    if message.reply_to_message:
-        target_user = message.reply_to_message.from_user
+    text = message.text.strip()
+    parts = text.split(maxsplit=1)
 
-        # ФИКС: Блокировка GroupAnonymousBot
-        if target_user.id == 1087968824:
-            error_msg = await message.reply_text("❌ Нельзя сбросить статистику анонимного сообщения!")
-            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
-            return
-
-        target_user_id = target_user.id
-        target_user_name = get_display_name(target_user)
-        target_username = target_user.username or str(target_user_id)
-        register_user(target_user_id, target_user.username, target_user_name)
-    else:
-        text = message.text.strip()
-        parts = text.split(maxsplit=1)
-
-        if len(parts) < 2:
-            error_msg = await message.reply_text("❌ Формат: /so @username")
-            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
-            return
-
+    if len(parts) >= 2:
         target_username = parts[1].lstrip('@')
 
         if message.entities:
@@ -999,6 +965,22 @@ async def reset_rejected_command(update: Update, context: ContextTypes.DEFAULT_T
                 error_msg = await message.reply_text(f"❌ @{target_username} не найден!")
                 asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
                 return
+    elif message.reply_to_message:
+        target_user = message.reply_to_message.from_user
+
+        if target_user.id == 1087968824:
+            error_msg = await message.reply_text("❌ Нельзя сбросить статистику анонимного сообщения!")
+            asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
+            return
+
+        target_user_id = target_user.id
+        target_user_name = get_display_name(target_user)
+        target_username = target_user.username or str(target_user_id)
+        register_user(target_user_id, target_user.username, target_user_name)
+    else:
+        error_msg = await message.reply_text("❌ Формат: /so @username")
+        asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
+        return
 
     stats = load_stats()
     user_key = str(target_user_id)
@@ -1157,7 +1139,7 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
     del reports_data[report_key]
 
 def main():
-    logger.info("🚀 Bot started - ALL commands protected from GroupAnonymousBot")
+    logger.info("🚀 Bot started - Text parsing priority fixed!")
 
     application = Application.builder().token(BOT_TOKEN).build()
 

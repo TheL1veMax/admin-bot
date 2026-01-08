@@ -485,6 +485,7 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
 
+        # ФИКС: Блокировка GroupAnonymousBot
         if target_user.id == 1087968824:
             error_msg = await message.reply_text("❌ Нельзя выдать выговор анонимному сообщению!")
             asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
@@ -586,6 +587,7 @@ async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_T
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
 
+        # ФИКС: Блокировка GroupAnonymousBot
         if target_user.id == 1087968824:
             error_msg = await message.reply_text("❌ Нельзя снять выговор с анонимного сообщения!")
             asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
@@ -676,6 +678,7 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
 
+        # ФИКС: Блокировка GroupAnonymousBot
         if target_user.id == 1087968824:
             error_msg = await message.reply_text("❌ Нельзя добавить анонимное сообщение в ЧС!")
             asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
@@ -791,6 +794,7 @@ async def unblacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
 
+        # ФИКС: Блокировка GroupAnonymousBot
         if target_user.id == 1087968824:
             error_msg = await message.reply_text("❌ Нельзя убрать анонимное сообщение из ЧС!")
             asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
@@ -874,6 +878,7 @@ async def reset_accepted_command(update: Update, context: ContextTypes.DEFAULT_T
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
 
+        # ФИКС: Блокировка GroupAnonymousBot
         if target_user.id == 1087968824:
             error_msg = await message.reply_text("❌ Нельзя сбросить статистику анонимного сообщения!")
             asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
@@ -953,6 +958,7 @@ async def reset_rejected_command(update: Update, context: ContextTypes.DEFAULT_T
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
 
+        # ФИКС: Блокировка GroupAnonymousBot
         if target_user.id == 1087968824:
             error_msg = await message.reply_text("❌ Нельзя сбросить статистику анонимного сообщения!")
             asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
@@ -1151,7 +1157,7 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
     del reports_data[report_key]
 
 def main():
-    logger.info("🚀 Bot started - GroupAnonymousBot fix applied")
+    logger.info("🚀 Bot started - ALL commands protected from GroupAnonymousBot")
 
     application = Application.builder().token(BOT_TOKEN).build()
 

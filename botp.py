@@ -1104,14 +1104,13 @@ async def handle_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     checkers = get_checkers_usernames(category)
     checker_mentions = ' '.join([f"@{username}" for username in checkers])
     category_name = "МОДЕРАЦИИ" if category == 'moderator' else "АДМИНИСТРАЦИИ"
-    user_stats = get_user_stats(sender.id)
 
     report_message = (
-        f"📋 <b>ОТЧЕТ {category_name}</b>\n\n"
-        f"👤 {sender.mention_html()}\n"
-        f"🎖 {sender_role.name if sender_role else 'Неизвестна'}\n"
-        f"📊 Принятых: {user_stats['accepted']}\n"
-        f"📝 {caption}\n\n"
+        f"📋 <b>НОВЫЙ ОТЧЕТ {category_name}</b>\n\n"
+        f"👤 Отправил: {sender.mention_html()}\n"
+        f"🎖 Роль: {sender_role.name if sender_role else 'Неизвестна'}\n"
+        f"📝 Детали:\n{caption}\n\n"
+        f"⚠️ Требуется проверка!\n"
         f"{checker_mentions}"
     )
 
@@ -1172,15 +1171,14 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
     status_text = "ПРИНЯТ" if action == 'accept' else "ОТКЛОНЕН"
 
     final_caption = (
-        f"{status_emoji} Отчет {category_title} {status_emoji}\n"
+        f"{status_emoji} <b>Отчет {category_title}</b>\n"
         f"{status_text}\n\n"
         f"👤 Отправил: {report['sender_name']}\n"
         f"🎖 Роль: {report['sender_role']}\n"
         f"📊 Принятых отчетов: {updated_stats['accepted']}\n"
-        f"📊 Отклоненных отчетов: {updated_stats['rejected']}\n"
+        f"📝 Детали:\n{report['caption']}\n\n"
         f"👨‍💼 Проверил: {checker_display_name} (@{checker.username})\n"
-        f"🎖 Роль проверяющего: {checker_role.name}\n"
-        f"📝 Детали:\n{report['caption']}"
+        f"🎖 Роль проверяющего: {checker_role.name}"
     )
 
     await context.bot.send_photo(

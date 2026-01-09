@@ -1171,8 +1171,7 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
     status_text = "ПРИНЯТ" if action == 'accept' else "ОТКЛОНЕН"
 
     final_caption = (
-        f"{status_emoji} <b>Отчет {category_title}</b>\n"
-        f"{status_text}\n\n"
+        f"{status_emoji} <b>Отчет {category_title} {status_text}</b>\n\n"
         f"👤 Отправил: {report['sender_name']}\n"
         f"🎖 Роль: {report['sender_role']}\n"
         f"📊 Принятых отчетов: {updated_stats['accepted']}\n"

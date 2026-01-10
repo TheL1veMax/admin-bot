@@ -53,19 +53,19 @@ USERS_ROLES = {
     'whysparky': Role.СЗМ,
     'maga8c': Role.АДМИН,
     'admin_user2': Role.АДМИН,
-    'anayka_lol': Role.МЛ_АДМИН,
-    'ml_admin2': Role.МЛ_АДМИН,
-    'matnozdra': Role.СТАРШИЙ_МОДЕРАТОР,
-    'st_moder2': Role.СТАРШИЙ_МОДЕРАТОР,
-    'breakbrosmiling': Role.МОДЕРАТОР,
-    'bosspogranki': Role.МОДЕРАТОР,
-    'spearskill': Role.МОДЕРАТОР,
-    'neverexikid': Role.МОДЕРАТОР,
-    'finn_wolfhard1223': Role.МОДЕРАТОР,
-    'miwa123009': Role.МОДЕРАТОР,
-    'sportaisam': Role.МОДЕРАТОР,
+    'ml_admin': Role.МЛ_АДМИН,
+    'matnozdra': Role.МЛ_АДМИН,
+    'miwa123009': Role.СТАРШИЙ_МОДЕРАТОР,
+    'breakbrosmiling': Role.СТАРШИЙ_МОДЕРАТОР,
+    'mpderatpr': Role.МОДЕРАТОР,
+    'moderator1': Role.МОДЕРАТОР,
+    'moderator2': Role.МОДЕРАТОР,
+    'moderator3': Role.МОДЕРАТОР,
+    'moderator4': Role.МОДЕРАТОР,
+    'moderator5': Role.МОДЕРАТОР,
+    'moderator6': Role.МОДЕРАТОР,
     'rusich_group35': Role.МОДЕРАТОР,
-    'za_spartakmsk': Role.МОДЕРАТОР
+    'moderator7': Role.МОДЕРАТОР
 }
 
 reports_data = {}
@@ -1233,3 +1233,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

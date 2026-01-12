@@ -70,7 +70,8 @@ USERS_ROLES = {
     'miwa123009': Role.МОДЕРАТОР,
     'sportaisam': Role.МОДЕРАТОР,
     'rusich_group35': Role.МОДЕРАТОР,
-    'za_spartakmsk': Role.МОДЕРАТОР
+    'za_spartakmsk': Role.МОДЕРАТОР,
+    '@qwelex_z': Role.МОДЕРАТОР,
 }
 
 reports_data = {}
@@ -1666,3 +1667,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

@@ -1,4 +1,4 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatPermissions
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 import logging
 from enum import IntEnum
@@ -32,6 +32,7 @@ DELETE_AFTER_SECONDS = 60
 PUNISHMENT_DELETE_SECONDS = 180
 STATS_COOLDOWN = 10
 MAX_WARNINGS = 3
+AUTO_MUTE_HOURS = 12
 DEPUTY_ADMIN_USERNAME = 'the_pr1estesss'
 DUPLICATE_CHECK_DAYS = 3
 
@@ -66,7 +67,7 @@ USERS_ROLES = {
     'bosspogranki': Role.МОДЕРАТОР,
     'spearskill': Role.МОДЕРАТОР,
     'neverexikid': Role.МОДЕРАТОР,
-    'qwelex_z': Role.МОДЕРАТОР,
+    'finn_wolfhard1223': Role.МОДЕРАТОР,
     'miwa123009': Role.МОДЕРАТОР,
     'sportaisam': Role.МОДЕРАТОР,
     'rusich_group35': Role.МОДЕРАТОР,
@@ -269,6 +270,44 @@ def add_punishment(user_id: int, username: str, full_name: str, punishment_type:
     except Exception as e:
         logger.error(f"Add punishment error: {e}")
     return False
+
+def get_active_warnings_count(user_id: int):
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT COUNT(*) FROM punishments
+                    WHERE user_id = %s 
+                    AND punishment_type = 'warn'
+                    AND created_at > NOW() - INTERVAL '30 days'
+                """, (user_id,))
+                return cur.fetchone()[0]
+    except Exception as e:
+        logger.error(f"Get warnings count error: {e}")
+    return 0
+
+def calculate_until_date(duration: str):
+    if duration == 'forever':
+        return None
+
+    now = datetime.now()
+
+    duration_map = {
+        '1h': timedelta(hours=1),
+        '2h': timedelta(hours=2),
+        '6h': timedelta(hours=6),
+        '12h': timedelta(hours=12),
+        '1d': timedelta(days=1),
+        '3d': timedelta(days=3),
+        '7d': timedelta(days=7),
+        '30d': timedelta(days=30)
+    }
+
+    delta = duration_map.get(duration)
+    if delta:
+        return int((now + delta).timestamp())
+
+    return None
 
 def get_user_stats(user_id: int):
     try:
@@ -1283,13 +1322,15 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
     status_emoji = "✅" if action == 'accept' else "❌"
     status_text = "ПРИНЯТ" if action == 'accept' else "ОТКЛОНЕН"
 
+    checker_display = f"{checker_display_name} (@{checker.username})" if checker_role >= Role.СЗА else checker_role.name
+
     final_caption = (
         f"{status_emoji} <b>Отчет {category_title} {status_text}</b>\n\n"
         f"👤 Отправил: {report['sender_name']}\n"
         f"🎖 Роль: {report['sender_role']}\n"
         f"📊 Принятых отчетов: {updated_stats['accepted']}\n"
         f"📝 Детали:\n{report['caption']}\n\n"
-        f"👨‍💼 Проверил: {checker_display_name} (@{checker.username})\n"
+        f"👨‍💼 Проверил: {checker_display}\n"
         f"🎖 Роль проверяющего: {checker_role.name}"
     )
 
@@ -1322,6 +1363,7 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
                     'moderator_username': report['sender_username'],
                     'approver_id': checker.id,
                     'approver_username': checker.username,
+                    'approver_role': checker_role,
                     'rule': parsed['rule'],
                     'recommendation': parsed['recommendation'] or ''
                 }
@@ -1378,7 +1420,6 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
 
     if punishment_type == 'warn':
         violator_id = punishment_data['violator_id']
-        violator_name = punishment_data['violator_name']
         rule = punishment_data['rule']
 
         duplicate = check_duplicate_punishment(violator_id, rule, 'warn', 'once')
@@ -1542,6 +1583,7 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
     violator_name = punishment_data['violator_name']
     moderator_username = punishment_data['moderator_username']
     approver_username = punishment_data['approver_username']
+    approver_role = punishment_data.get('approver_role')
     rule = punishment_data['rule']
 
     add_punishment(
@@ -1578,17 +1620,52 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
 
     duration_display = f" {duration_text.get(duration, duration)}" if duration != 'once' else ""
 
+    approver_display = f"@{approver_username}" if approver_role >= Role.СЗА else approver_role.name
+
     notification = (
         f"{punishment_emoji[punishment_type]} @{violator_username} получил {punishment_name[punishment_type]}{duration_display}\n"
         f"📝 Правило: {rule}\n"
         f"👮 Модератор: @{moderator_username}\n"
-        f"✅ Одобрил: @{approver_username}"
+        f"✅ Одобрил: {approver_display}"
     )
 
     try:
+        if punishment_type == 'mute':
+            until_date = calculate_until_date(duration)
+            await context.bot.restrict_chat_member(
+                chat_id=f'@{PUBLIC_CHAT_USERNAME}',
+                user_id=violator_id,
+                permissions=ChatPermissions(can_send_messages=False),
+                until_date=until_date
+            )
+            logger.info(f"Muted user {violator_id} for {duration}")
+
+        elif punishment_type == 'ban':
+            until_date = calculate_until_date(duration)
+            await context.bot.ban_chat_member(
+                chat_id=f'@{PUBLIC_CHAT_USERNAME}',
+                user_id=violator_id,
+                until_date=until_date
+            )
+            logger.info(f"Banned user {violator_id} for {duration}")
+
+        elif punishment_type == 'warn':
+            warn_count = get_active_warnings_count(violator_id)
+            if warn_count >= MAX_WARNINGS:
+                auto_mute_until = calculate_until_date('12h')
+                await context.bot.restrict_chat_member(
+                    chat_id=f'@{PUBLIC_CHAT_USERNAME}',
+                    user_id=violator_id,
+                    permissions=ChatPermissions(can_send_messages=False),
+                    until_date=auto_mute_until
+                )
+                notification += f"\n\n🚫 <b>АВТОМУТ 12 ЧАСОВ</b>\n(3 варна)"
+                logger.info(f"Auto-muted user {violator_id} for 12h (3 warns)")
+
         msg = await context.bot.send_message(
             chat_id=f"@{PUBLIC_CHAT_USERNAME}",
-            text=notification
+            text=notification,
+            parse_mode='HTML'
         )
 
         asyncio.create_task(
@@ -1596,7 +1673,7 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
         )
 
     except Exception as e:
-        logger.error(f"Failed to send punishment notification: {e}")
+        logger.error(f"Failed to execute punishment: {e}")
 
 def main():
     if not DATABASE_URL:
@@ -1630,4 +1707,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

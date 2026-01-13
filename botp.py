@@ -1779,25 +1779,26 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
         logger.error(f"Failed to execute punishment: {e}")
 
 async def handle_main_chat_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Автосохранение пользователей из основного чата"""
+    """Автосохранение пользователей (кроме отчетов с фото)"""
     try:
-        logger.info("🔔 ПОЛУЧЕНО СООБЩЕНИЕ")
         message = update.message or update.edited_message
         if not message:
             return
+
+        # Если это ФОТО В ТОПИКЕ = пропускаем (это отчет!)
+        if message.photo and message.message_thread_id:
+            return
+
         chat = message.chat
         user = message.from_user
-        logger.info(f"📨 От: @{user.username or user.id} | Чат: @{chat.username or chat.id}")
+
         is_main = chat.id == GROUP_CHAT_ID or (chat.username and chat.username.lower() == PUBLIC_CHAT_USERNAME.lower())
-        if not is_main:
+        if not is_main or user.is_bot:
             return
-        logger.info("✅ ОСНОВНОЙ ЧАТ!")
-        if user.is_bot:
-            return
+
         user_display_name = get_display_name(user)
-        logger.info(f"💾 СОХРАНЯЮ: @{user.username or user.id}")
         register_user(user.id, user.username, user_display_name)
-        logger.info(f"✅✅✅ СОХРАНЕН!")
+        logger.info(f"💾 Сохранен: @{user.username or user.id}")
     except Exception as e:
         logger.error(f"❌ {e}", exc_info=True)
 
@@ -1817,13 +1818,13 @@ def main():
 
     application = Application.builder().token(BOT_TOKEN).build()
 
-    # Регистрация обработчика автосохранения
-    logger.info("="*70)
-    logger.info("📡 РЕГИСТРАЦИЯ ОБРАБОТЧИКА для @pmkk_loves_chat")
-    logger.info("="*70)
-    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_main_chat_message))
-    logger.info("✅ ОБРАБОТЧИК ЗАРЕГИСТРИРОВАН!")
+    # Сначала СПЕЦИФИЧНЫЕ обработчики (фото-отчеты)
+    application.add_handler(MessageHandler(filters.PHOTO & filters.ChatType.SUPERGROUP, handle_report))
 
+    # Потом ОБЩИЕ (автосохранение)
+    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_main_chat_message))
+
+    # Команды
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("vg", warning_command))
@@ -1832,7 +1833,8 @@ def main():
     application.add_handler(CommandHandler("ubl", unblacklist_command))
     application.add_handler(CommandHandler("sp", reset_accepted_command))
     application.add_handler(CommandHandler("so", reset_rejected_command))
-    application.add_handler(MessageHandler(filters.PHOTO & filters.ChatType.SUPERGROUP, handle_report))
+
+    # Кнопки
     application.add_handler(CallbackQueryHandler(handle_button_callback))
 
     logger.info("✅ Bot running with automatic punishments!")

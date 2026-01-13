@@ -18,6 +18,8 @@ BOT_TOKEN = '8275792067:AAFkuxFjLrpsvInoheghSYIenRIqVLiBfCM'
 GROUP_CHAT_ID = -1002418857530
 PUBLIC_CHAT_USERNAME = 'pmkk_loves_chat'
 DATABASE_URL = os.getenv('DATABASE_URL')
+# ID чата/канала для логов - ЗАМЕНИТЕ НА СВОЙ!
+LOGS_CHAT_ID = -1003629150527  # Создайте канал, добавьте бота, узнайте ID
 
 MODERATOR_REPORT_TOPIC_ID = 14
 ADMIN_REPORT_TOPIC_ID = 13
@@ -450,6 +452,18 @@ async def delete_messages_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_i
         except Exception as e:
             logger.error(f"Failed to delete {msg_id}: {e}")
 
+
+async def send_log(context: ContextTypes.DEFAULT_TYPE, log_text: str, parse_mode: str = 'HTML'):
+    """Отправляет лог-сообщение в отдельный чат/канал"""
+    try:
+        await context.bot.send_message(
+            chat_id=LOGS_CHAT_ID,
+            text=log_text,
+            parse_mode=parse_mode
+        )
+    except Exception as e:
+        logger.error(f"Не удалось отправить лог: {e}")
+
 def get_user_role(username: str):
     if not username:
         return None
@@ -741,6 +755,17 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text=warning_message,
         parse_mode='HTML'
     )
+
+    # Логирование
+    log_text = (
+        f"⚠️ <b>ВЫГОВОР #{warning_count}/{MAX_WARNINGS}</b>\n\n"
+        f"👤 Получил: {target_user_name} (@{target_username})\n"
+        f"🆔 ID: {target_user_id}\n"
+        f"📝 Причина: {reason}\n"
+        f"👨‍💼 Выдал: @{issuer.username} ({issuer_role.name})\n"
+        f"⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+    )
+    await send_log(context, log_text)
 
     success_msg = await message.reply_text(f"✅ Выговор #{warning_count} выдан {user_link}", parse_mode='HTML')
     asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, success_msg.message_id], DELETE_AFTER_SECONDS))
@@ -1342,6 +1367,18 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
         parse_mode='HTML'
     )
 
+    # Логирование
+    status_emoji = "✅" if action == "accept" else "❌"
+    log_text = (
+        f"{status_emoji} <b>ОТЧЕТ {'ПРИНЯТ' if action == 'accept' else 'ОТКЛОНЕН'}</b>\n\n"
+        f"📁 Категория: {category_title}\n"
+        f"👤 Отправитель: {report['sender_name']} (@{report['sender_username']})\n"
+        f"👨‍💼 Проверил: {checker_display} (@{checker.username})\n"
+        f"📊 Статистика: ✅{updated_stats['accepted']} | ❌{updated_stats['rejected']}\n"
+        f"⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+    )
+    await send_log(context, log_text)
+
     await query.edit_message_caption(
         caption=query.message.caption + f"\n\n{status_emoji} {status_text} (@{checker.username})",
         parse_mode='HTML'
@@ -1405,6 +1442,36 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
     report_id = parts[2]
 
     punishment_key = f"punishment_{report_id}"
+
+    # Обработка ручной выдачи наказания
+    if punishment_type == "manual":
+        if punishment_key not in pending_punishments:
+            await query.answer("❌ Данные не найдены!", show_alert=True)
+            return
+
+        punishment_data = pending_punishments[punishment_key]
+        manual_text = (
+            f"✋ <b>Выдайте наказание вручную</b>\n\n"
+            f"👤 Нарушитель: @{punishment_data['violator_username']}\n"
+            f"🆔 ID: {punishment_data['violator_id']}\n"
+            f"📋 Правило: {punishment_data['rule']}\n"
+            f"💡 Рекомендация: {punishment_data.get('recommendation') or 'Не указана'}\n\n"
+            f"Используйте команды бота вручную"
+        )
+        await query.edit_message_text(manual_text, parse_mode='HTML')
+
+        # Логируем
+        log_text = (
+            f"📝 <b>РУЧНАЯ ВЫДАЧА НАКАЗАНИЯ</b>\n\n"
+            f"👤 Нарушитель: @{punishment_data['violator_username']}\n"
+            f"📋 Правило: {punishment_data['rule']}\n"
+            f"👨‍💼 Проверяющий: @{query.from_user.username}\n"
+            f"⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+        )
+        await send_log(context, log_text)
+
+        del pending_punishments[punishment_key]
+        return
     if punishment_key not in pending_punishments:
         await query.answer("❌ Данные не найдены!", show_alert=True)
         return

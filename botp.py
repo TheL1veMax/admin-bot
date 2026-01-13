@@ -1320,6 +1320,44 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
         await handle_punishment_duration(update, context)
     elif data.startswith('confirm_duplicate_'):
         await handle_duplicate_confirmation(update, context)
+    elif data.startswith('confirm_warn_'):
+        report_id = data.split('_')[-1]
+        punishment_key = f"punishment_{report_id}"
+        if punishment_key not in pending_punishments:
+            await query.answer("❌ Данные не найдены!", show_alert=True)
+            return
+
+        punishment_data = pending_punishments[punishment_key]
+        violator_id = punishment_data['violator_id']
+        rule = punishment_data['rule']
+
+        # Проверка на дубликаты
+        duplicate = check_duplicate_punishment(violator_id, rule, "warn", "once")
+        if duplicate:
+            days_ago = (datetime.now() - duplicate['created_at']).days
+            keyboard = [
+                [InlineKeyboardButton("✅ Да, выдать повторно", callback_data=f"confirm_duplicate_warn_{report_id}")],
+                [InlineKeyboardButton("⬅️ Назад", callback_data=f"back_punishment_{report_id}")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            warning_text = (
+                f"⚠️ <b>ВНИМАНИЕ! Возможный дубликат</b>\n\n"
+                f"@{punishment_data['violator_username']}\n"
+                f"Правило: {rule}\n"
+                f"Выдано {days_ago} дн. назад\n\n"
+                f"Выдать варн повторно?"
+            )
+            await query.edit_message_text(warning_text, parse_mode='HTML', reply_markup=reply_markup)
+            return
+
+        # Выдаем варн
+        await execute_punishment(context, punishment_data, "warn", "once")
+        await query.edit_message_text(f"✅ Варн выдан @{punishment_data['violator_username']}")
+
+        # Удаляем через 2 минуты
+        asyncio.create_task(delete_messages_after_delay(context, query.message.chat.id, [query.message.message_id], PUNISHMENT_DELETE_SECONDS))
+
+        del pending_punishments[punishment_key]
     elif data.startswith('back_punishment_'):
         report_id = data.split('_')[-1]
         punishment_key = f"punishment_{report_id}"
@@ -1573,11 +1611,6 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
             keyboard.append([
                 InlineKeyboardButton("Навсегда", callback_data=f"duration_{punishment_type}_forever_{report_id}")
             ])
-
-        # Добавляем кнопку "Назад"
-        keyboard.append([
-            InlineKeyboardButton("⬅️ Назад", callback_data=f"back_punishment_{report_id}")
-        ])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
 

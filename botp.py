@@ -66,7 +66,7 @@ USERS_ROLES = {
     'bosspogranki': Role.МОДЕРАТОР,
     'spearskill': Role.МОДЕРАТОР,
     'neverexikid': Role.МОДЕРАТОР,
-    'finn_wolfhard1223': Role.МОДЕРАТОР,
+    'qwelex_z': Role.МОДЕРАТОР,
     'miwa123009': Role.МОДЕРАТОР,
     'sportaisam': Role.МОДЕРАТОР,
     'rusich_group35': Role.МОДЕРАТОР,
@@ -1630,3 +1630,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

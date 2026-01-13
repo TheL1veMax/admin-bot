@@ -60,7 +60,7 @@ USERS_ROLES = {
     'mskmboky': Role.СТАРШИЙ_АДМИН,
     'whysparky': Role.СЗМ,
     'maga8c': Role.АДМИН,
-    'admin_user2': Role.АДМИН,
+    'qwelex_z': Role.АДМИН,
     'anayka_lol': Role.МЛ_АДМИН,
     'ml_admin2': Role.МЛ_АДМИН,
     'matnozdra': Role.СТАРШИЙ_МОДЕРАТОР,
@@ -1808,3 +1808,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

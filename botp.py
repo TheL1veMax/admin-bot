@@ -1574,6 +1574,11 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
                 InlineKeyboardButton("Навсегда", callback_data=f"duration_{punishment_type}_forever_{report_id}")
             ])
 
+        # Добавляем кнопку "Назад"
+        keyboard.append([
+            InlineKeyboardButton("⬅️ Назад", callback_data=f"back_punishment_{report_id}")
+        ])
+
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         punishment_name = "мута" if punishment_type == 'mute' else "бана"

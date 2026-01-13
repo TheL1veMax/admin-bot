@@ -70,8 +70,7 @@ USERS_ROLES = {
     'miwa123009': Role.МОДЕРАТОР,
     'sportaisam': Role.МОДЕРАТОР,
     'rusich_group35': Role.МОДЕРАТОР,
-    'za_spartakmsk': Role.МОДЕРАТОР,
-    '@qwelex_z': Role.МОДЕРАТОР,
+    'za_spartakmsk': Role.МОДЕРАТОР
 }
 
 reports_data = {}
@@ -209,12 +208,6 @@ def find_user_id_by_username(username: str):
     return None, None
 
 def parse_report_details(caption: str):
-    """Парсит детали отчета в формате:
-    @violator
-    @moderator
-    2h/warn
-    правило
-    """
     lines = caption.strip().split('\n')
     violator = None
     moderator = None
@@ -240,7 +233,6 @@ def parse_report_details(caption: str):
     }
 
 def check_duplicate_punishment(user_id: int, rule: str, punishment_type: str, duration: str, days: int = DUPLICATE_CHECK_DAYS):
-    """Проверка на дубликаты наказаний за последние N дней"""
     try:
         with get_db_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -263,7 +255,6 @@ def check_duplicate_punishment(user_id: int, rule: str, punishment_type: str, du
 def add_punishment(user_id: int, username: str, full_name: str, punishment_type: str, 
                    duration: str, rule: str, issued_by: int, issued_by_username: str,
                    approved_by: int, approved_by_username: str):
-    """Добавить наказание в базу"""
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
@@ -453,11 +444,9 @@ def can_reset_stats(user_role):
     return user_role is not None and user_role >= Role.СЗМ
 
 def can_punish_forever(user_role):
-    """Может ли выдавать наказания навсегда (только ЗГА и СЗА)"""
     return user_role is not None and user_role >= Role.ЗАМ_ГЛАВНОГО
 
 def can_issue_punishment(user_role):
-    """Может ли выдавать наказания (СЗМ+)"""
     return user_role is not None and user_role >= Role.СЗМ
 
 def get_report_category(user_role):
@@ -1249,18 +1238,19 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
 
     data = query.data
 
-    # Обработка принятия/отклонения отчета
     if data.startswith('accept_') or data.startswith('reject_'):
         await handle_report_decision(update, context)
-    # Обработка выбора типа наказания
     elif data.startswith('punish_'):
         await handle_punishment_type(update, context)
-    # Обработка выбора срока наказания
     elif data.startswith('duration_'):
         await handle_punishment_duration(update, context)
-    # Подтверждение дубликата
     elif data.startswith('confirm_duplicate_'):
         await handle_duplicate_confirmation(update, context)
+    elif data.startswith('cancel_punishment_'):
+        punishment_key = f"punishment_{data.split('_')[-1]}"
+        if punishment_key in pending_punishments:
+            del pending_punishments[punishment_key]
+        await query.edit_message_text("❌ Отменено")
 
 async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1316,7 +1306,6 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
         parse_mode='HTML'
     )
 
-    # Если отчет принят и категория "модерация" - показать меню наказаний
     if action == 'accept' and category == 'moderator':
         parsed = parse_report_details(report['caption'])
 
@@ -1324,7 +1313,6 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
             violator_id, violator_name = find_user_id_by_username(parsed['violator'])
 
             if violator_id:
-                # Сохраняем данные для выдачи наказания
                 punishment_key = f"punishment_{report_id}"
                 pending_punishments[punishment_key] = {
                     'violator_id': violator_id,
@@ -1338,7 +1326,6 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
                     'recommendation': parsed['recommendation'] or ''
                 }
 
-                # Создаем кнопки выбора типа наказания
                 keyboard = [
                     [
                         InlineKeyboardButton("🚫 Мут", callback_data=f"punish_mute_{report_id}"),
@@ -1372,7 +1359,7 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
 async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     parts = query.data.split('_')
-    punishment_type = parts[1]  # mute, warn, ban
+    punishment_type = parts[1]
     report_id = parts[2]
 
     punishment_key = f"punishment_{report_id}"
@@ -1389,13 +1376,11 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
         await query.answer("❌ Нет прав на выдачу наказаний! (СЗМ+)", show_alert=True)
         return
 
-    # Если варн - сразу выдаем
     if punishment_type == 'warn':
         violator_id = punishment_data['violator_id']
         violator_name = punishment_data['violator_name']
         rule = punishment_data['rule']
 
-        # Проверка дубликатов
         duplicate = check_duplicate_punishment(violator_id, rule, 'warn', 'once')
 
         if duplicate:
@@ -1409,7 +1394,7 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
             warning_text = (
                 f"⚠️ <b>ВНИМАНИЕ!</b>\n\n"
                 f"@{punishment_data['violator_username']} уже получал варн\n"
-                f"за "{rule}" {days_ago} дн. назад\n\n"
+                f"за \"{rule}\" {days_ago} дн. назад\n\n"
                 f"Продолжить?"
             )
 
@@ -1420,12 +1405,10 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
             )
             return
 
-        # Выдаем варн
         await execute_punishment(context, punishment_data, 'warn', 'once')
         await query.edit_message_text(f"✅ Варн выдан @{punishment_data['violator_username']}")
         del pending_punishments[punishment_key]
 
-    # Если мут или бан - показываем кнопки выбора времени
     else:
         can_forever = can_punish_forever(checker_role)
 
@@ -1461,8 +1444,8 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
 async def handle_punishment_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     parts = query.data.split('_')
-    punishment_type = parts[1]  # mute, ban
-    duration = parts[2]  # 1h, 2h, 1d, forever
+    punishment_type = parts[1]
+    duration = parts[2]
     report_id = parts[3]
 
     punishment_key = f"punishment_{report_id}"
@@ -1476,12 +1459,10 @@ async def handle_punishment_duration(update: Update, context: ContextTypes.DEFAU
 
     checker_role = get_user_role(query.from_user.username)
 
-    # Проверка прав на "навсегда"
     if duration == 'forever' and not can_punish_forever(checker_role):
         await query.answer("❌ Нет прав на бессрочные наказания! (только ЗГА и СЗА)", show_alert=True)
         return
 
-    # Проверка дубликатов
     duplicate = check_duplicate_punishment(violator_id, rule, punishment_type, duration)
 
     if duplicate:
@@ -1498,7 +1479,7 @@ async def handle_punishment_duration(update: Update, context: ContextTypes.DEFAU
         warning_text = (
             f"⚠️ <b>ВНИМАНИЕ!</b>\n\n"
             f"@{punishment_data['violator_username']} уже получал\n"
-            f"{punishment_name} {duration_text} за "{rule}"\n"
+            f"{punishment_name} {duration_text} за \"{rule}\"\n"
             f"{days_ago} дн. назад\n\n"
             f"Продолжить?"
         )
@@ -1510,7 +1491,6 @@ async def handle_punishment_duration(update: Update, context: ContextTypes.DEFAU
         )
         return
 
-    # Выдаем наказание
     await execute_punishment(context, punishment_data, punishment_type, duration)
 
     punishment_name = "Мут" if punishment_type == 'mute' else "Бан"
@@ -1543,7 +1523,6 @@ async def handle_duplicate_confirmation(update: Update, context: ContextTypes.DE
 
     punishment_data = pending_punishments[punishment_key]
 
-    # Выдаем наказание несмотря на дубликат
     await execute_punishment(context, punishment_data, punishment_type, duration)
 
     punishment_name = "Варн" if punishment_type == 'warn' else ("Мут" if punishment_type == 'mute' else "Бан")
@@ -1557,7 +1536,6 @@ async def handle_duplicate_confirmation(update: Update, context: ContextTypes.DE
 
 async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data: dict, 
                             punishment_type: str, duration: str):
-    """Выполнить наказание в публичном чате"""
 
     violator_id = punishment_data['violator_id']
     violator_username = punishment_data['violator_username']
@@ -1566,7 +1544,6 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
     approver_username = punishment_data['approver_username']
     rule = punishment_data['rule']
 
-    # Сохраняем в базу
     add_punishment(
         violator_id, violator_username, violator_name,
         punishment_type, duration, rule,
@@ -1574,7 +1551,6 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
         punishment_data['approver_id'], approver_username
     )
 
-    # Формируем текст уведомления
     punishment_emoji = {
         'mute': '🚫',
         'warn': '⚠️',
@@ -1609,28 +1585,15 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
         f"✅ Одобрил: @{approver_username}"
     )
 
-    # Отправляем в публичный чат
     try:
         msg = await context.bot.send_message(
             chat_id=f"@{PUBLIC_CHAT_USERNAME}",
             text=notification
         )
 
-        # Удаляем через 3 минуты
         asyncio.create_task(
             delete_messages_after_delay(context, msg.chat_id, [msg.message_id], PUNISHMENT_DELETE_SECONDS)
         )
-
-        # TODO: Здесь нужно добавить реальное применение наказания через Chat Permissions API
-        # Например для мута:
-        # if punishment_type == 'mute':
-        #     until_date = calculate_until_date(duration)
-        #     await context.bot.restrict_chat_member(
-        #         chat_id=f"@{PUBLIC_CHAT_USERNAME}",
-        #         user_id=violator_id,
-        #         permissions=ChatPermissions(can_send_messages=False),
-        #         until_date=until_date
-        #     )
 
     except Exception as e:
         logger.error(f"Failed to send punishment notification: {e}")
@@ -1667,4 +1630,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

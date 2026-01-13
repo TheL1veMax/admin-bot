@@ -1424,7 +1424,7 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
             violator_username = parsed['violator']
             violator_id, violator_name = find_user_id_by_username(violator_username)
             if not violator_id:
-                await context.bot.send_message(chat_id=LOGS_CHAT_ID, text=f"⚠️ @{violator_username} НЕ НАЙДЕН", parse_mode='HTML')
+                await context.bot.send_message(chat_id=LOGS_CHAT_ID, text=f"⚠️ @{violator_username} НЕ НАЙДЕН В БАЗЕ", parse_mode='HTML')
             if violator_id:
                 punishment_key = f"punishment_{report_id}"
                 pending_punishments[punishment_key] = {
@@ -1778,41 +1778,8 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
     except Exception as e:
         logger.error(f"Failed to execute punishment: {e}")
 
-def main():
-    if not DATABASE_URL:
-        logger.error("❌ DATABASE_URL не задан!")
-        return
-
-    try:
-        init_database()
-        logger.info("✅ База данных инициализирована")
-    except Exception as e:
-        logger.error(f"❌ Ошибка инициализации БД: {e}")
-        return
-
-    logger.info("🚀 Bot started with PostgreSQL!")
-
-    application = Application.builder().token(BOT_TOKEN).build()
-
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("stats", stats_command))
-    application.add_handler(CommandHandler("vg", warning_command))
-    application.add_handler(CommandHandler("svg", remove_warning_command))
-    application.add_handler(CommandHandler("bl", blacklist_command))
-    application.add_handler(CommandHandler("ubl", unblacklist_command))
-    application.add_handler(CommandHandler("sp", reset_accepted_command))
-    application.add_handler(CommandHandler("so", reset_rejected_command))
-    application.add_handler(MessageHandler(filters.PHOTO & filters.ChatType.SUPERGROUP, handle_report))
-    application.add_handler(CallbackQueryHandler(handle_button_callback))
-
-    logger.info("✅ Bot running with automatic punishments!")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
-
-if __name__ == '__main__':
-    main()
-
 async def handle_main_chat_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Автосохранение пользователей"""
+    """Автосохранение пользователей из основного чата"""
     try:
         logger.info("🔔 ПОЛУЧЕНО СООБЩЕНИЕ")
         message = update.message or update.edited_message
@@ -1834,4 +1801,43 @@ async def handle_main_chat_message(update: Update, context: ContextTypes.DEFAULT
     except Exception as e:
         logger.error(f"❌ {e}", exc_info=True)
 
+def main():
+    if not DATABASE_URL:
+        logger.error("❌ DATABASE_URL не задан!")
+        return
+
+    try:
+        init_database()
+        logger.info("✅ База данных инициализирована")
+    except Exception as e:
+        logger.error(f"❌ Ошибка инициализации БД: {e}")
+        return
+
+    logger.info("🚀 Bot started with PostgreSQL!")
+
+    application = Application.builder().token(BOT_TOKEN).build()
+
+    # Регистрация обработчика автосохранения
+    logger.info("="*70)
+    logger.info("📡 РЕГИСТРАЦИЯ ОБРАБОТЧИКА для @pmkk_loves_chat")
+    logger.info("="*70)
+    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_main_chat_message))
+    logger.info("✅ ОБРАБОТЧИК ЗАРЕГИСТРИРОВАН!")
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("stats", stats_command))
+    application.add_handler(CommandHandler("vg", warning_command))
+    application.add_handler(CommandHandler("svg", remove_warning_command))
+    application.add_handler(CommandHandler("bl", blacklist_command))
+    application.add_handler(CommandHandler("ubl", unblacklist_command))
+    application.add_handler(CommandHandler("sp", reset_accepted_command))
+    application.add_handler(CommandHandler("so", reset_rejected_command))
+    application.add_handler(MessageHandler(filters.PHOTO & filters.ChatType.SUPERGROUP, handle_report))
+    application.add_handler(CallbackQueryHandler(handle_button_callback))
+
+    logger.info("✅ Bot running with automatic punishments!")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == '__main__':
+    main()
 

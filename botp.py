@@ -1423,16 +1423,8 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
         if parsed['violator'] and parsed['rule']:
             violator_username = parsed['violator']
             violator_id, violator_name = find_user_id_by_username(violator_username)
-
-            logger.info(f"🔍 Поиск: @{violator_username} -> ID={violator_id}")
-
             if not violator_id:
-                await context.bot.send_message(
-                    chat_id=LOGS_CHAT_ID,
-                    text=f"⚠️ @{violator_username} НЕ НАЙДЕН\n\nПодождите пока он напишет в @{PUBLIC_CHAT_USERNAME}",
-                    parse_mode='HTML'
-                )
-
+                await context.bot.send_message(chat_id=LOGS_CHAT_ID, text=f"⚠️ @{violator_username} НЕ НАЙДЕН", parse_mode='HTML')
             if violator_id:
                 punishment_key = f"punishment_{report_id}"
                 pending_punishments[punishment_key] = {
@@ -1581,10 +1573,8 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
 
         if can_forever:
             keyboard.append([
-                InlineKeyboardButton("♾ Навсегда", callback_data=f"duration_{punishment_type}_forever_{report_id}")
+                InlineKeyboardButton("Навсегда", callback_data=f"duration_{punishment_type}_forever_{report_id}")
             ])
-
-        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data=f"back_punishment_{report_id}")])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -1820,4 +1810,27 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+async def handle_main_chat_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        logger.info("🔔 ПОЛУЧЕНО СООБЩЕНИЕ")
+        message = update.message or update.edited_message
+        if not message:
+            return
+        chat = message.chat
+        user = message.from_user
+        logger.info(f"📨 От: @{user.username or user.id} | Чат: @{chat.username or chat.id}")
+        is_main = chat.id == GROUP_CHAT_ID or (chat.username and chat.username.lower() == PUBLIC_CHAT_USERNAME.lower())
+        if not is_main:
+            return
+        logger.info(f"✅ ОСНОВНОЙ ЧАТ!")
+        if user.is_bot:
+            return
+        user_display_name = get_display_name(user)
+        logger.info(f"💾 СОХРАНЯЮ: @{user.username or user.id}")
+        register_user(user.id, user.username, user_display_name)
+        logger.info(f"✅✅✅ СОХРАНЕН!")
+    except Exception as e:
+        logger.error(f"❌ {e}", exc_info=True)
+
 

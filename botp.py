@@ -15,8 +15,8 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = '8275792067:AAFkuxFjLrpsvInoheghSYIenRIqVLiBfCM'
-GROUP_CHAT_ID = -1002418857530  # Числовой ID (запасной)
-PUBLIC_CHAT_USERNAME = "pmkk_loves_chat"  # Username публичного чата
+GROUP_CHAT_ID = -1002418857530
+PUBLIC_CHAT_USERNAME = "pmkk_loves_chat"
 PUBLIC_CHAT_USERNAME = 'pmkk_loves_chat'
 DATABASE_URL = os.getenv('DATABASE_URL')
 # ID канала для логов

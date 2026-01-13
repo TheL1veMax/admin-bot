@@ -15,7 +15,8 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = '8275792067:AAFkuxFjLrpsvInoheghSYIenRIqVLiBfCM'
-GROUP_CHAT_ID = -1002418857530
+GROUP_CHAT_ID = -1002418857530  # Числовой ID (запасной)
+PUBLIC_CHAT_USERNAME = "pmkk_loves_chat"  # Username публичного чата
 PUBLIC_CHAT_USERNAME = 'pmkk_loves_chat'
 DATABASE_URL = os.getenv('DATABASE_URL')
 # ID канала для логов
@@ -1409,7 +1410,6 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
         f"📊 Статистика: ✅{updated_stats['accepted']} | ❌{updated_stats['rejected']}\n"
         f"⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
     )
-    # Логи только при выдаче наказания!
     # await send_log(context, log_text)
 
     await query.edit_message_caption(
@@ -1424,22 +1424,14 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
             violator_username = parsed['violator']
             violator_id, violator_name = find_user_id_by_username(violator_username)
 
-            logger.info(f"🔍 Поиск нарушителя: @{violator_username} -> ID={violator_id}")
+            logger.info(f"🔍 Поиск: @{violator_username} -> ID={violator_id}")
 
             if not violator_id:
-                error_msg = (
-                    f"⚠️ <b>@{violator_username} НЕ НАЙДЕН</b>\n\n"
-                    f"Пользователь еще не писал в основной чат.\n"
-                    f"Подождите пока он напишет любое сообщение.\n\n"
-                    f"📋 Правило: {parsed.get('rule', 'не указано')}\n"
-                    f"👤 Модератор: @{parsed.get('moderator', 'неизвестно')}"
-                )
                 await context.bot.send_message(
                     chat_id=LOGS_CHAT_ID,
-                    text=error_msg,
+                    text=f"⚠️ @{violator_username} НЕ НАЙДЕН\n\nПодождите пока он напишет в @{PUBLIC_CHAT_USERNAME}",
                     parse_mode='HTML'
                 )
-                logger.error(f"❌ @{violator_username} не найден в базе")
 
             if violator_id:
                 punishment_key = f"punishment_{report_id}"
@@ -1592,9 +1584,7 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
                 InlineKeyboardButton("♾ Навсегда", callback_data=f"duration_{punishment_type}_forever_{report_id}")
             ])
 
-        keyboard.append([
-            InlineKeyboardButton("⬅️ Назад", callback_data=f"back_punishment_{report_id}")
-        ])
+        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data=f"back_punishment_{report_id}")])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
 

@@ -195,56 +195,6 @@ def register_user(user_id: int, username: str, full_name: str):
     except Exception as e:
         logger.error(f"Register user error: {e}")
 
-async def find_user_by_username(username: str, context):
-    """
-    Ищет пользователя по username:
-    1. Сначала в базе данных
-    2. Затем пытается получить через Telegram API
-    """
-    # Сначала проверяем базу
-    try:
-        with get_db_connection() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("""
-                    SELECT user_id, full_name FROM users
-                    WHERE LOWER(username) = LOWER(%s)
-                """, (username,))
-                result = cur.fetchone()
-                if result:
-                    logger.info(f"✅ Пользователь @{username} найден в базе: ID={result['user_id']}")
-                    return result['user_id'], result['full_name']
-    except Exception as e:
-        logger.error(f"Ошибка поиска в базе: {e}")
-
-    # Если не нашли в базе - пытаемся получить через API
-    logger.info(f"🔍 Пользователь @{username} не в базе, пробую через API...")
-
-    try:
-        # Пытаемся получить информацию о пользователе через getChatMember
-        try:
-            # Получаем участника из основного чата
-            member = await context.bot.get_chat_member(chat_id=GROUP_CHAT_ID, user_id=f"@{username}")
-            user = member.user
-
-            if user and user.id != 1087968824:  # Не бот
-                user_id = user.id
-                full_name = get_display_name(user)
-
-                # Сохраняем в базу для следующих раз
-                register_user(user_id, username, full_name)
-
-                logger.info(f"✅ Пользователь @{username} получен через API: ID={user_id}")
-                return user_id, full_name
-        except Exception as e:
-            logger.warning(f"Не удалось получить через getChatMember: {e}")
-
-    except Exception as e:
-        logger.error(f"Ошибка получения через API: {e}")
-
-    logger.warning(f"❌ Пользователь @{username} не найден нигде")
-    return None, None
-
-# Старая синхронная версия для совместимости
 def find_user_id_by_username(username: str):
     try:
         with get_db_connection() as conn:
@@ -1459,7 +1409,6 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
         f"📊 Статистика: ✅{updated_stats['accepted']} | ❌{updated_stats['rejected']}\n"
         f"⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
     )
-    # Логи только при выдаче!
     # await send_log(context, log_text)
 
     await query.edit_message_caption(
@@ -1472,39 +1421,15 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
 
         if parsed['violator'] and parsed['rule']:
             violator_username = parsed['violator']
-
-            # ИСПОЛЬЗУЕМ НОВУЮ ASYNC ФУНКЦИЮ
-            violator_id, violator_name = await find_user_by_username(violator_username, context)
-
-            logger.info(f"🔍 Поиск @{violator_username}: ID={violator_id}, Name={violator_name}")
+            violator_id, violator_name = find_user_id_by_username(violator_username)
+            logger.info(f"🔍 @{violator_username} -> ID={violator_id}")
 
             if not violator_id:
-                # Пользователь не найден даже через API
-                error_msg = (
-                    f"⚠️ <b>ОШИБКА: Пользователь @{violator_username} не найден!</b>\n\n"
-                    f"Проверено:\n"
-                    f"✓ База данных бота\n"
-                    f"✓ Telegram API\n"
-                    f"✓ Участники чата\n\n"
-                    f"<b>Возможные причины:</b>\n"
-                    f"• Неправильный username (проверьте написание)\n"
-                    f"• Пользователь не является участником чата\n"
-                    f"• Username изменен\n\n"
-                    f"<b>Решение:</b>\n"
-                    f"1. Проверьте правильность username: @{violator_username}\n"
-                    f"2. Убедитесь что пользователь в чате\n"
-                    f"3. Используйте команды с reply на сообщение:\n"
-                    f"   • <code>/vg</code> - варн\n"
-                    f"   • <code>/bl дней причина</code> - ЧС\n\n"
-                    f"📋 Отчет от: @{parsed.get('moderator', 'неизвестно')}\n"
-                    f"📝 Правило: {parsed.get('rule', 'не указано')}"
-                )
                 await context.bot.send_message(
                     chat_id=LOGS_CHAT_ID,
-                    text=error_msg,
+                    text=f"⚠️ @{violator_username} не найден. Подождите пока он напишет в чат.",
                     parse_mode='HTML'
                 )
-                logger.error(f"❌ @{violator_username} НЕ НАЙДЕН нигде!")
 
             if violator_id:
                 punishment_key = f"punishment_{report_id}"
@@ -1657,9 +1582,7 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
                 InlineKeyboardButton("♾ Навсегда", callback_data=f"duration_{punishment_type}_forever_{report_id}")
             ])
 
-        keyboard.append([
-            InlineKeyboardButton("⬅️ Назад", callback_data=f"back_punishment_{report_id}")
-        ])
+        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data=f"back_punishment_{report_id}")])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
 

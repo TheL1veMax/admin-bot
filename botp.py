@@ -67,7 +67,7 @@ USERS_ROLES = {
     'bosspogranki': Role.МОДЕРАТОР,
     'spearskill': Role.МОДЕРАТОР,
     'neverexikid': Role.МОДЕРАТОР,
-    'qwelex_z': Role.МОДЕРАТОР,
+    'finn_wolfhard1223': Role.МОДЕРАТОР,
     'miwa123009': Role.МОДЕРАТОР,
     'sportaisam': Role.МОДЕРАТОР,
     'rusich_group35': Role.МОДЕРАТОР,
@@ -1347,7 +1347,7 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
         parse_mode='HTML'
     )
 
-    if action == 'accept' and category == 'moderator':
+    if action == 'accept':
         parsed = parse_report_details(report['caption'])
 
         if parsed['violator'] and parsed['rule']:
@@ -1707,4 +1707,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

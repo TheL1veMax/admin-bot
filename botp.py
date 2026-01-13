@@ -1438,11 +1438,10 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
                 }
 
                 keyboard = [
-                    [
-                        InlineKeyboardButton("🚫 Мут", callback_data=f"punish_mute_{report_id}"),
-                        InlineKeyboardButton("⚠️ Варн", callback_data=f"punish_warn_{report_id}"),
-                        InlineKeyboardButton("🔒 Бан", callback_data=f"punish_ban_{report_id}")
-                    ]
+                    [InlineKeyboardButton("🔇 Мут", callback_data=f"punish_mute_{report_id}")],
+                    [InlineKeyboardButton("⚠️ Варн", callback_data=f"punish_warn_{report_id}")],
+                    [InlineKeyboardButton("🚫 Бан", callback_data=f"punish_ban_{report_id}")],
+                    [InlineKeyboardButton("✋ Выдать вручную", callback_data=f"punish_manual_{report_id}")]
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
 

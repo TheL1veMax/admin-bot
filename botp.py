@@ -18,8 +18,8 @@ BOT_TOKEN = '8275792067:AAFkuxFjLrpsvInoheghSYIenRIqVLiBfCM'
 GROUP_CHAT_ID = -1002418857530
 PUBLIC_CHAT_USERNAME = 'pmkk_loves_chat'
 DATABASE_URL = os.getenv('DATABASE_URL')
-# ID чата/канала для логов - ЗАМЕНИТЕ НА СВОЙ!
-LOGS_CHAT_ID = -1003629150527  # Создайте канал, добавьте бота, узнайте ID
+# ID канала для логов
+LOGS_CHAT_ID = -1003629150527
 
 MODERATOR_REPORT_TOPIC_ID = 14
 ADMIN_REPORT_TOPIC_ID = 13
@@ -31,7 +31,7 @@ WARNINGS_TOPIC_ID = 2976
 BLACKLIST_TOPIC_ID = 3680
 
 DELETE_AFTER_SECONDS = 60
-PUNISHMENT_DELETE_SECONDS = 180
+PUNISHMENT_DELETE_SECONDS = 120  # 2 минуты
 STATS_COOLDOWN = 10
 MAX_WARNINGS = 3
 AUTO_MUTE_HOURS = 12
@@ -60,7 +60,7 @@ USERS_ROLES = {
     'mskmboky': Role.СТАРШИЙ_АДМИН,
     'whysparky': Role.СЗМ,
     'maga8c': Role.АДМИН,
-    'qwelex_z': Role.АДМИН,
+    'admin_user2': Role.АДМИН,
     'anayka_lol': Role.МЛ_АДМИН,
     'ml_admin2': Role.МЛ_АДМИН,
     'matnozdra': Role.СТАРШИЙ_МОДЕРАТОР,
@@ -73,7 +73,7 @@ USERS_ROLES = {
     'miwa123009': Role.МОДЕРАТОР,
     'sportaisam': Role.МОДЕРАТОР,
     'rusich_group35': Role.МОДЕРАТОР,
-    'moderator': Role.МОДЕРАТОР
+    'za_spartakmsk': Role.МОДЕРАТОР
 }
 
 reports_data = {}
@@ -756,9 +756,8 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='HTML'
     )
 
-    # Логирование
     log_text = (
-        f"⚠️ <b>ВЫГОВОР #{warning_count}/{MAX_WARNINGS}</b>\n\n"
+        f"⚠️ <b>ВЫДАН ВЫГОВОР #{warning_count}/{MAX_WARNINGS}</b>\n\n"
         f"👤 Получил: {target_user_name} (@{target_username})\n"
         f"🆔 ID: {target_user_id}\n"
         f"📝 Причина: {reason}\n"
@@ -768,7 +767,7 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_log(context, log_text)
 
     success_msg = await message.reply_text(f"✅ Выговор #{warning_count} выдан {user_link}", parse_mode='HTML')
-    asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, success_msg.message_id], DELETE_AFTER_SECONDS))
+    asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, success_msg.message_id], PUNISHMENT_DELETE_SECONDS))
 
 async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
@@ -856,7 +855,7 @@ async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_T
     )
 
     success_msg = await message.reply_text(f"✅ Снят! Осталось: {new_count}", parse_mode='HTML')
-    asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, success_msg.message_id], DELETE_AFTER_SECONDS))
+    asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, success_msg.message_id], PUNISHMENT_DELETE_SECONDS))
 
 async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
@@ -970,8 +969,19 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='HTML'
     )
 
+    log_text = (
+        f"🚫 <b>ДОБАВЛЕН В ЧЕРНЫЙ СПИСОК</b>\n\n"
+        f"👤 Пользователь: {target_user_name} (@{target_username})\n"
+        f"🆔 ID: {target_user_id}\n"
+        f"📝 Причина: {reason}\n"
+        f"⏱ Срок: {days} дн. ({end_date.strftime('%d.%m.%Y')})\n"
+        f"👨‍💼 Выдал: @{issuer.username} ({issuer_role.name})\n"
+        f"⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+    )
+    await send_log(context, log_text)
+
     success_msg = await message.reply_text(f"✅ {user_link} в ЧС", parse_mode='HTML')
-    asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, success_msg.message_id], DELETE_AFTER_SECONDS))
+    asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, success_msg.message_id], PUNISHMENT_DELETE_SECONDS))
 
 async def unblacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
@@ -1053,7 +1063,7 @@ async def unblacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
 
     success_msg = await message.reply_text(f"✅ {user_link} удален из ЧС!", parse_mode='HTML')
-    asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, success_msg.message_id], DELETE_AFTER_SECONDS))
+    asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, success_msg.message_id], PUNISHMENT_DELETE_SECONDS))
 
 async def reset_accepted_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
@@ -1310,6 +1320,28 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
         await handle_punishment_duration(update, context)
     elif data.startswith('confirm_duplicate_'):
         await handle_duplicate_confirmation(update, context)
+    elif data.startswith('back_punishment_'):
+        report_id = data.split('_')[-1]
+        punishment_key = f"punishment_{report_id}"
+        if punishment_key not in pending_punishments:
+            await query.answer("❌ Данные не найдены!", show_alert=True)
+            return
+        punishment_data = pending_punishments[punishment_key]
+
+        keyboard = [
+            [InlineKeyboardButton("🔇 Мут", callback_data=f"punish_mute_{report_id}")],
+            [InlineKeyboardButton("⚠️ Варн", callback_data=f"punish_warn_{report_id}")],
+            [InlineKeyboardButton("🚫 Бан", callback_data=f"punish_ban_{report_id}")],
+            [InlineKeyboardButton("✋ Выдать вручную", callback_data=f"punish_manual_{report_id}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        punishment_text = (
+            f"⚖️ Выберите наказание\n\n"
+            f"👤 Нарушитель: @{punishment_data['violator_username']}\n"
+            f"📋 Правило: {punishment_data['rule']}\n"
+            f"💡 Рекомендация: {punishment_data.get('recommendation') or 'не указана'}"
+        )
+        await query.edit_message_text(punishment_text, parse_mode='HTML', reply_markup=reply_markup)
     elif data.startswith('cancel_punishment_'):
         punishment_key = f"punishment_{data.split('_')[-1]}"
         if punishment_key in pending_punishments:
@@ -1367,12 +1399,12 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
         parse_mode='HTML'
     )
 
-    # Логирование
     status_emoji = "✅" if action == "accept" else "❌"
     log_text = (
         f"{status_emoji} <b>ОТЧЕТ {'ПРИНЯТ' if action == 'accept' else 'ОТКЛОНЕН'}</b>\n\n"
         f"📁 Категория: {category_title}\n"
         f"👤 Отправитель: {report['sender_name']} (@{report['sender_username']})\n"
+        f"🎖 Роль: {report['sender_role']}\n"
         f"👨‍💼 Проверил: {checker_display} (@{checker.username})\n"
         f"📊 Статистика: ✅{updated_stats['accepted']} | ❌{updated_stats['rejected']}\n"
         f"⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
@@ -1443,7 +1475,7 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
 
     punishment_key = f"punishment_{report_id}"
 
-    # Обработка ручной выдачи наказания
+    # Обработка ручной выдачи
     if punishment_type == "manual":
         if punishment_key not in pending_punishments:
             await query.answer("❌ Данные не найдены!", show_alert=True)
@@ -1462,10 +1494,12 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
 
         # Логируем
         log_text = (
-            f"📝 <b>РУЧНАЯ ВЫДАЧА НАКАЗАНИЯ</b>\n\n"
-            f"👤 Нарушитель: @{punishment_data['violator_username']}\n"
+            f"✋ <b>ВЫДАНО ВРУЧНУЮ</b>\n\n"
+            f"👤 Нарушитель: @{punishment_data['violator_username']} (ID: {punishment_data['violator_id']})\n"
             f"📋 Правило: {punishment_data['rule']}\n"
-            f"👨‍💼 Проверяющий: @{query.from_user.username}\n"
+            f"💡 Рекомендация: {punishment_data.get('recommendation') or 'Не указана'}\n"
+            f"👨‍💼 Модератор: @{punishment_data['moderator_username']}\n"
+            f"✅ Решение принял: @{query.from_user.username}\n"
             f"⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
         )
         await send_log(context, log_text)
@@ -1774,7 +1808,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-
-

@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 BOT_TOKEN = '8275792067:AAFkuxFjLrpsvInoheghSYIenRIqVLiBfCM'
 GROUP_CHAT_ID = -1002418857530
+PUBLIC_CHAT_USERNAME = "pmkk_loves_chat"
 PUBLIC_CHAT_USERNAME = 'pmkk_loves_chat'
 DATABASE_URL = os.getenv('DATABASE_URL')
 # ID канала для логов
@@ -1809,4 +1810,28 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+async def handle_main_chat_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Автосохранение пользователей"""
+    try:
+        logger.info("🔔 ПОЛУЧЕНО СООБЩЕНИЕ")
+        message = update.message or update.edited_message
+        if not message:
+            return
+        chat = message.chat
+        user = message.from_user
+        logger.info(f"📨 От: @{user.username or user.id} | Чат: @{chat.username or chat.id}")
+        is_main = chat.id == GROUP_CHAT_ID or (chat.username and chat.username.lower() == PUBLIC_CHAT_USERNAME.lower())
+        if not is_main:
+            return
+        logger.info("✅ ОСНОВНОЙ ЧАТ!")
+        if user.is_bot:
+            return
+        user_display_name = get_display_name(user)
+        logger.info(f"💾 СОХРАНЯЮ: @{user.username or user.id}")
+        register_user(user.id, user.username, user_display_name)
+        logger.info(f"✅✅✅ СОХРАНЕН!")
+    except Exception as e:
+        logger.error(f"❌ {e}", exc_info=True)
+
 

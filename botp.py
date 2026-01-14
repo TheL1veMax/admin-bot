@@ -14,7 +14,7 @@ import re
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.getenv('BOT_TOKEN', '8521296474:AAEEjqw3KC7jDMWL44eulDVZDPiqlTmQy_A')  # Переменная окружения или дефолт
+BOT_TOKEN = os.getenv('BOT_TOKEN')  # Переменная окружения или дефолт
 GROUP_CHAT_ID = -1002418857530
 PUBLIC_CHAT_USERNAME = "pmkk_loves_chat"
 PUBLIC_CHAT_USERNAME = 'pmkk_loves_chat'
@@ -1840,6 +1840,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 

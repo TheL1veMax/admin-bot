@@ -14,7 +14,7 @@ import re
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.getenv('BOT_TOKEN')  # Переменная окружения или дефолт
+BOT_TOKEN = os.getenv('BOT_TOKEN')
 GROUP_CHAT_ID = -1002418857530
 PUBLIC_CHAT_USERNAME = "pmkk_loves_chat"
 PUBLIC_CHAT_USERNAME = 'pmkk_loves_chat'
@@ -1492,8 +1492,7 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
             f"💡 Рекомендация: {punishment_data.get('recommendation') or 'Не указана'}\n\n"
             f"⚠️ Наказание нужно выдать в соответствии с правилами"
         )
-        bot_msg = await query.edit_message_text(manual_text, parse_mode='HTML')
-        await delete_messages_after_delay(context, GROUP_CHAT_ID, [bot_msg.message_id], 120)
+        await query.edit_message_text(manual_text, parse_mode='HTML')
 
         # Логируем
         log_text = (
@@ -1503,8 +1502,7 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
             f"💡 Рекомендация: {punishment_data.get('recommendation') or 'Не указана'}\n"
             f"👨‍💼 Модератор: @{punishment_data['moderator_username']}\n"
             f"✅ Решение принял: @{query.from_user.username}\n"
-            f"⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n"
-            f"⚠️ Наказание нужно выдать в соответствии с правилами"
+            f"⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
         )
         await send_log(context, log_text)
 
@@ -1552,8 +1550,7 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
             return
 
         await execute_punishment(context, punishment_data, 'warn', 'once')
-        bot_msg = await query.edit_message_text(f"✅ Варн выдан @{punishment_data['violator_username']}")
-        await delete_messages_after_delay(context, GROUP_CHAT_ID, [bot_msg.message_id], 120)
+        await query.edit_message_text(f"✅ Варн выдан @{punishment_data['violator_username']}")
         del pending_punishments[punishment_key]
 
     else:
@@ -1578,7 +1575,6 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
             keyboard.append([
                 InlineKeyboardButton("Навсегда", callback_data=f"duration_{punishment_type}_forever_{report_id}")
             ])
-
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data=f"back_punishment_{report_id}")])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1784,23 +1780,18 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
         logger.error(f"Failed to execute punishment: {e}")
 
 async def handle_main_chat_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Автосохранение пользователей (кроме отчетов с фото)"""
+    """Автосохранение пользователей"""
     try:
         message = update.message or update.edited_message
         if not message:
             return
-
-        # Если это ФОТО В ТОПИКЕ = пропускаем (это отчет!)
         if message.photo and message.message_thread_id:
             return
-
         chat = message.chat
         user = message.from_user
-
         is_main = chat.id == GROUP_CHAT_ID or (chat.username and chat.username.lower() == PUBLIC_CHAT_USERNAME.lower())
         if not is_main or user.is_bot:
             return
-
         user_display_name = get_display_name(user)
         register_user(user.id, user.username, user_display_name)
         logger.info(f"💾 Сохранен: @{user.username or user.id}")
@@ -1840,7 +1831,4 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-
 

@@ -1492,7 +1492,12 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
             f"💡 Рекомендация: {punishment_data.get('recommendation') or 'Не указана'}\n\n"
             f"⚠️ Наказание нужно выдать в соответствии с правилами"
         )
-        await query.edit_message_text(manual_text, parse_mode='HTML')
+        msg = await query.edit_message_text(manual_text, parse_mode='HTML')
+
+        # Автоудаление через 2 минуты
+        asyncio.create_task(
+            delete_messages_after_delay(context, GROUP_CHAT_ID, [msg.message_id], PUNISHMENT_DELETE_SECONDS)
+        )
 
         # Логируем
         log_text = (

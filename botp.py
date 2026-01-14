@@ -14,7 +14,7 @@ import re
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.getenv('BOT_TOKEN')  # Берём из переменных окружения Railway
+BOT_TOKEN = os.getenv('BOT_TOKEN', '8275792067:AAFkuxFjLrpsvInoheghSYIenRIqVLiBfCM')  # Переменная окружения или дефолт
 GROUP_CHAT_ID = -1002418857530
 PUBLIC_CHAT_USERNAME = "pmkk_loves_chat"
 PUBLIC_CHAT_USERNAME = 'pmkk_loves_chat'
@@ -63,8 +63,8 @@ USERS_ROLES = {
     'maga8c': Role.АДМИН,
     'qwelex_z': Role.АДМИН,
     'anayka_lol': Role.МЛ_АДМИН,
-    'matnozdra': Role.МЛ_АДМИН,
-    'stmoder': Role.СТАРШИЙ_МОДЕРАТОР,
+    'ml_admin2': Role.МЛ_АДМИН,
+    'matnozdra': Role.СТАРШИЙ_МОДЕРАТОР,
     'st_moder2': Role.СТАРШИЙ_МОДЕРАТОР,
     'breakbrosmiling': Role.МОДЕРАТОР,
     'bosspogranki': Role.МОДЕРАТОР,
@@ -1493,9 +1493,7 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
             f"⚠️ Наказание нужно выдать в соответствии с правилами"
         )
         bot_msg = await query.edit_message_text(manual_text, parse_mode='HTML')
-
-        # Автоудаление через 2 минуты
-        asyncio.create_task(delete_messages_after_delay(context, GROUP_CHAT_ID, [bot_msg.message_id], 120))
+        await delete_messages_after_delay(context, GROUP_CHAT_ID, [bot_msg.message_id], 120)
 
         # Логируем
         log_text = (
@@ -1555,9 +1553,7 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
 
         await execute_punishment(context, punishment_data, 'warn', 'once')
         bot_msg = await query.edit_message_text(f"✅ Варн выдан @{punishment_data['violator_username']}")
-
-        # Автоудаление через 2 минуты
-        asyncio.create_task(delete_messages_after_delay(context, GROUP_CHAT_ID, [bot_msg.message_id], 120))
+        await delete_messages_after_delay(context, GROUP_CHAT_ID, [bot_msg.message_id], 120)
         del pending_punishments[punishment_key]
 
     else:
@@ -1583,7 +1579,6 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
                 InlineKeyboardButton("Навсегда", callback_data=f"duration_{punishment_type}_forever_{report_id}")
             ])
 
-        # Кнопка "Назад"
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data=f"back_punishment_{report_id}")])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1828,13 +1823,8 @@ def main():
 
     application = Application.builder().token(BOT_TOKEN).build()
 
-    # Сначала СПЕЦИФИЧНЫЕ (фото-отчеты)
     application.add_handler(MessageHandler(filters.PHOTO & filters.ChatType.SUPERGROUP, handle_report))
-
-    # Потом ОБЩИЕ (автосохранение)
     application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_main_chat_message))
-
-    # Команды
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("vg", warning_command))
@@ -1843,8 +1833,6 @@ def main():
     application.add_handler(CommandHandler("ubl", unblacklist_command))
     application.add_handler(CommandHandler("sp", reset_accepted_command))
     application.add_handler(CommandHandler("so", reset_rejected_command))
-
-    # Кнопки
     application.add_handler(CallbackQueryHandler(handle_button_callback))
 
     logger.info("✅ Bot running with automatic punishments!")
@@ -1852,5 +1840,4 @@ def main():
 
 if __name__ == '__main__':
     main()
-
 

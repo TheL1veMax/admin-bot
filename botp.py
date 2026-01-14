@@ -446,12 +446,14 @@ def remove_from_blacklist(user_id: int):
         return False
 
 async def delete_messages_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_ids: list, delay: int):
+    """Удаляет сообщения из чата после задержки"""
     await asyncio.sleep(delay)
     for msg_id in message_ids:
         try:
             await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+            logger.info(f"🗑️ Удалено сообщение {msg_id} из чата {chat_id}")
         except Exception as e:
-            logger.error(f"Failed to delete {msg_id}: {e}")
+            logger.error(f"❌ Не удалось удалить {msg_id}: {e}")
 
 
 
@@ -1495,6 +1497,19 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
 
     del reports_data[report_key]
 
+
+    # Удаление из категории ОТЧЕТНОСТЬ
+    if query.message.message_thread_id in [MODERATOR_REPORT_TOPIC_ID, ADMIN_REPORT_TOPIC_ID]:
+        asyncio.create_task(
+            delete_messages_after_delay(
+                context,
+                query.message.chat.id,
+                [query.message.message_id],
+                120
+            )
+        )
+        logger.info(f"⏰ Отклонённый отчёт будет удалён через 2 мин")
+
 async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     parts = query.data.split('_')
@@ -1770,6 +1785,38 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
             )
             logger.info(f"Muted user {violator_id} for {duration}")
 
+            # ЛОГ МУТА в канал
+            duration_text = "Навсегда" if duration == "forever" else duration
+            end_date_ts = until_date if until_date else 0
+            end_date = "—" if duration == "forever" else datetime.fromtimestamp(end_date_ts).strftime('%d.%m.%Y %H:%M')
+
+            moderator_role = get_user_role_name(callback_data.get('moderator_username', ''))
+            checker_role = get_user_role_name(callback_data.get('checker_username', ''))
+
+            log_text = (
+                f"🔇 <b>ВЫДАН МУТ</b>\n\n"
+                f"👤 @{callback_data.get('violator_username', 'unknown')} (ID: {violator_id})\n"
+                f"📋 Правило: {callback_data.get('rule', 'Не указано')}\n"
+                f"⏱ Длительность: {duration_text}\n"
+            )
+            if duration != "forever":
+                log_text += f"🔚 До: {end_date}\n"
+
+            log_text += (
+                f"\n🎖 Ранг: {moderator_role} (@{callback_data.get('moderator_username', 'unknown')})\n"
+            )
+
+            checker_username = callback_data.get('checker_username', '').lower()
+            checker_role_enum = USERS_ROLES.get(checker_username)
+            if checker_role_enum and checker_role_enum >= Role.СЗА:
+                log_text += f"✅ Одобрил: {checker_role} (@{callback_data.get('checker_username', 'unknown')})\n"
+            else:
+                log_text += f"✅ Одобрил: {checker_role}\n"
+
+            log_text += f"⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+
+            await send_log(context, log_text)
+
         elif punishment_type == 'ban':
             until_date = calculate_until_date(duration)
             await context.bot.ban_chat_member(
@@ -1778,6 +1825,38 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
                 until_date=until_date
             )
             logger.info(f"Banned user {violator_id} for {duration}")
+
+            # ЛОГ БАНА в канал
+            duration_text = "Навсегда" if duration == "forever" else duration
+            end_date_ts = until_date if until_date else 0
+            end_date = "—" if duration == "forever" else datetime.fromtimestamp(end_date_ts).strftime('%d.%m.%Y %H:%M')
+
+            moderator_role = get_user_role_name(callback_data.get('moderator_username', ''))
+            checker_role = get_user_role_name(callback_data.get('checker_username', ''))
+
+            log_text = (
+                f"🚫 <b>ВЫДАН БАН</b>\n\n"
+                f"👤 @{callback_data.get('violator_username', 'unknown')} (ID: {violator_id})\n"
+                f"📋 Правило: {callback_data.get('rule', 'Не указано')}\n"
+                f"⏱ Длительность: {duration_text}\n"
+            )
+            if duration != "forever":
+                log_text += f"🔚 До: {end_date}\n"
+
+            log_text += (
+                f"\n🎖 Ранг: {moderator_role} (@{callback_data.get('moderator_username', 'unknown')})\n"
+            )
+
+            checker_username = callback_data.get('checker_username', '').lower()
+            checker_role_enum = USERS_ROLES.get(checker_username)
+            if checker_role_enum and checker_role_enum >= Role.СЗА:
+                log_text += f"✅ Одобрил: {checker_role} (@{callback_data.get('checker_username', 'unknown')})\n"
+            else:
+                log_text += f"✅ Одобрил: {checker_role}\n"
+
+            log_text += f"⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+
+            await send_log(context, log_text)
 
         elif punishment_type == 'warn':
             warn_count = get_active_warnings_count(violator_id)
@@ -1792,30 +1871,29 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
                 notification += f"\n\n🚫 <b>АВТОМУТ 12 ЧАСОВ</b>\n(3 варна)"
                 logger.info(f"Auto-muted user {violator_id} for 12h (3 warns)")
 
-        # ЛОГ ВАРНА В КАНАЛ: С username модератора
-        warn_count = get_active_warnings_count(violator_id) + 1
-        moderator_role = get_user_role_name(data['moderator_username'])
-        checker_role = get_user_role_name(data['checker_username'])
+        # ЛОГ ВАРНА в канал
+        warn_count = get_active_warnings_count(violator_id)
+        moderator_role = get_user_role_name(callback_data.get('moderator_username', ''))
+        checker_role = get_user_role_name(callback_data.get('checker_username', ''))
 
         log_text = (
             f"⚠️ <b>ВЫДАН ВАРН</b>\n\n"
-            f"👤 @{data['violator_username']} (ID: {violator_id})\n"
-            f"📋 {data['rule']}\n"
+            f"👤 @{callback_data.get('violator_username', 'unknown')} (ID: {violator_id})\n"
+            f"📋 {callback_data.get('rule', 'Не указано')}\n"
             f"📊 Варнов: {warn_count}/3\n\n"
-            f"🎖 Ранг: {moderator_role} (@{data['moderator_username']})\n"
+            f"🎖 Ранг: {moderator_role} (@{callback_data.get('moderator_username', 'unknown')})\n"
         )
 
-        checker_username_lower = data['checker_username'].lower()
-        checker_role_enum = USERS_ROLES.get(checker_username_lower)
+        checker_username = callback_data.get('checker_username', '').lower()
+        checker_role_enum = USERS_ROLES.get(checker_username)
         if checker_role_enum and checker_role_enum >= Role.СЗА:
-            log_text += f"✅ Одобрил: {checker_role} (@{data['checker_username']})\n"
+            log_text += f"✅ Одобрил: {checker_role} (@{callback_data.get('checker_username', 'unknown')})\n"
         else:
             log_text += f"✅ Одобрил: {checker_role}\n"
 
         log_text += f"⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
 
         await send_log(context, log_text)
-        logger.info(f"📤 ЛОГ ВАРНА отправлен!")
 
         msg = await context.bot.send_message(
             chat_id=f"@{PUBLIC_CHAT_USERNAME}",
@@ -1827,6 +1905,7 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
         asyncio.create_task(
             delete_messages_after_delay(context, msg.chat.id, [msg.message_id], PUNISHMENT_DELETE_SECONDS)
         )
+        logger.info(f"⏰ Уведомление будет удалено через {PUNISHMENT_DELETE_SECONDS}с")
 
     except Exception as e:
         logger.error(f"Failed to execute punishment: {e}")
@@ -1885,15 +1964,15 @@ if __name__ == '__main__':
     main()
 
 
-    # Удаление из категории ОТЧЕТНОСТЬ (топики 13 и 14)
+    # Удаление из категории ОТЧЕТНОСТЬ
     if query.message.message_thread_id in [MODERATOR_REPORT_TOPIC_ID, ADMIN_REPORT_TOPIC_ID]:
         asyncio.create_task(
             delete_messages_after_delay(
-                context, 
-                query.message.chat.id, 
-                [query.message.message_id], 
-                120  # 2 минуты
+                context,
+                query.message.chat.id,
+                [query.message.message_id],
+                120
             )
         )
-        logger.info(f"⏰ Отчёт из админки будет удалён через 2 минуты")
+        logger.info(f"⏰ Принятый отчёт будет удалён через 2 мин")
 

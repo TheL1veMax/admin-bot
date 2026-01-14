@@ -446,13 +446,17 @@ def remove_from_blacklist(user_id: int):
         return False
 
 async def delete_messages_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_ids: list, delay: int):
-    await asyncio.sleep(delay)
-    for msg_id in message_ids:
-        try:
-            await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
-        except Exception as e:
-            logger.error(f"Failed to delete {msg_id}: {e}")
-
+    """Удаление сообщений после задержки"""
+    try:
+        await asyncio.sleep(delay)
+        for msg_id in message_ids:
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+                logger.info(f"🗑️ Удалено сообщение {msg_id} в чате {chat_id}")
+            except Exception as e:
+                logger.error(f"❌ Не удалось удалить сообщение {msg_id}: {e}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка в delete_messages_after_delay: {e}")
 
 async def send_log(context: ContextTypes.DEFAULT_TYPE, log_text: str, parse_mode: str = 'HTML'):
     """Отправляет лог-сообщение в отдельный чат/канал"""
@@ -1492,12 +1496,7 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
             f"💡 Рекомендация: {punishment_data.get('recommendation') or 'Не указана'}\n\n"
             f"⚠️ Наказание нужно выдать в соответствии с правилами"
         )
-        msg = await query.edit_message_text(manual_text, parse_mode='HTML')
-
-        # Автоудаление через 2 минуты
-        asyncio.create_task(
-            delete_messages_after_delay(context, GROUP_CHAT_ID, [msg.message_id], PUNISHMENT_DELETE_SECONDS)
-        )
+        await query.edit_message_text(manual_text, parse_mode='HTML')
 
         # Логируем
         log_text = (

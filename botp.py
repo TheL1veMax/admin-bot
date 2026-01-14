@@ -446,13 +446,41 @@ def remove_from_blacklist(user_id: int):
         return False
 
 async def delete_messages_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_ids: list, delay: int):
+    """Удаление сообщений после задержки"""
     await asyncio.sleep(delay)
     for msg_id in message_ids:
         try:
             await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+            logger.info(f"🗑️ Удалено: {msg_id}")
         except Exception as e:
-            logger.error(f"Failed to delete {msg_id}: {e}")
+            logger.error(f"❌ Не удалось удалить {msg_id}: {e}")
 
+
+
+def get_user_role_name(username: str) -> str:
+    """Получить название роли по username"""
+    if not username:
+        return "Модератор"
+
+    username_lower = username.lower()
+    role = USERS_ROLES.get(username_lower)
+
+    if role is None:
+        return "Модератор"
+
+    role_names = {
+        Role.ГЛАВНЫЙ_АДМИН: "Главный Админ",
+        Role.СЗА: "СЗА",
+        Role.ЗАМ_ГЛАВНОГО: "Зам. Главного",
+        Role.СТАРШИЙ_АДМИН: "Старший Админ",
+        Role.СЗМ: "СЗМ",
+        Role.АДМИН: "Админ",
+        Role.МЛ_АДМИН: "Мл. Админ",
+        Role.СТАРШИЙ_МОДЕРАТОР: "Ст. Модератор",
+        Role.МОДЕРАТОР: "Модератор"
+    }
+
+    return role_names.get(role, "Модератор")
 
 async def send_log(context: ContextTypes.DEFAULT_TYPE, log_text: str, parse_mode: str = 'HTML'):
     """Отправляет лог-сообщение в отдельный чат/канал"""
@@ -1410,7 +1438,7 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
         f"📊 Статистика: ✅{updated_stats['accepted']} | ❌{updated_stats['rejected']}\n"
         f"⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
     )
-    # await send_log(context, log_text)  # ОТКЛЮЧЕНО - логи только при наказаниях
+    # await send_log(context, log_text)  # ОТКЛЮЧЕНО
 
     await query.edit_message_caption(
         caption=query.message.caption + f"\n\n{status_emoji} {status_text} (@{checker.username})",
@@ -1773,8 +1801,9 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
         )
 
         asyncio.create_task(
-            delete_messages_after_delay(context, msg.chat_id, [msg.message_id], PUNISHMENT_DELETE_SECONDS)
+            delete_messages_after_delay(context, GROUP_CHAT_ID, [msg.message_id], PUNISHMENT_DELETE_SECONDS)
         )
+        logger.info(f"⏰ Удаление через {PUNISHMENT_DELETE_SECONDS}с: msg {msg.message_id}")
 
     except Exception as e:
         logger.error(f"Failed to execute punishment: {e}")

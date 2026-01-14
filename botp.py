@@ -1410,7 +1410,7 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
         f"📊 Статистика: ✅{updated_stats['accepted']} | ❌{updated_stats['rejected']}\n"
         f"⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
     )
-    # await send_log(context, log_text)
+    await send_log(context, log_text)
 
     await query.edit_message_caption(
         caption=query.message.caption + f"\n\n{status_emoji} {status_text} (@{checker.username})",
@@ -1490,7 +1490,7 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
             f"🆔 ID: {punishment_data['violator_id']}\n"
             f"📋 Правило: {punishment_data['rule']}\n"
             f"💡 Рекомендация: {punishment_data.get('recommendation') or 'Не указана'}\n\n"
-            f"Используйте команды бота вручную"
+            f"⚠️ Наказание нужно выдать в соответствии с правилами"
         )
         await query.edit_message_text(manual_text, parse_mode='HTML')
 
@@ -1502,7 +1502,8 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
             f"💡 Рекомендация: {punishment_data.get('recommendation') or 'Не указана'}\n"
             f"👨‍💼 Модератор: @{punishment_data['moderator_username']}\n"
             f"✅ Решение принял: @{query.from_user.username}\n"
-            f"⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+            f"⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n"
+            f"⚠️ Наказание нужно выдать в соответствии с правилами"
         )
         await send_log(context, log_text)
 
@@ -1575,6 +1576,9 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
             keyboard.append([
                 InlineKeyboardButton("Навсегда", callback_data=f"duration_{punishment_type}_forever_{report_id}")
             ])
+
+        # Кнопка "Назад"
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data=f"back_punishment_{report_id}")])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -1818,7 +1822,7 @@ def main():
 
     application = Application.builder().token(BOT_TOKEN).build()
 
-    # Сначала СПЕЦИФИЧНЫЕ обработчики (фото-отчеты)
+    # Сначала СПЕЦИФИЧНЫЕ (фото-отчеты)
     application.add_handler(MessageHandler(filters.PHOTO & filters.ChatType.SUPERGROUP, handle_report))
 
     # Потом ОБЩИЕ (автосохранение)

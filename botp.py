@@ -446,41 +446,15 @@ def remove_from_blacklist(user_id: int):
         return False
 
 async def delete_messages_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_ids: list, delay: int):
-    """Удаление сообщений"""
+    """Удаляет сообщения из указанного чата после задержки"""
     await asyncio.sleep(delay)
     for msg_id in message_ids:
         try:
             await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
-            logger.info(f"🗑️ Удалено: {msg_id}")
+            logger.info(f"🗑️ Удалено сообщение {msg_id} из чата {chat_id}")
         except Exception as e:
-            logger.error(f"❌ Не удалось удалить {msg_id}: {e}")
+            logger.error(f"❌ Не удалось удалить {msg_id} из чата {chat_id}: {e}")
 
-
-
-def get_user_role_name(username: str) -> str:
-    """Получить название роли по username"""
-    if not username:
-        return "Модератор"
-
-    username_lower = username.lower()
-    role = USERS_ROLES.get(username_lower)
-
-    if role is None:
-        return "Модератор"
-
-    role_names = {
-        Role.ГЛАВНЫЙ_АДМИН: "Главный Админ",
-        Role.СЗА: "СЗА",
-        Role.ЗАМ_ГЛАВНОГО: "Зам. Главного",
-        Role.СТАРШИЙ_АДМИН: "Старший Админ",
-        Role.СЗМ: "СЗМ",
-        Role.АДМИН: "Админ",
-        Role.МЛ_АДМИН: "Мл. Админ",
-        Role.СТАРШИЙ_МОДЕРАТОР: "Ст. Модератор",
-        Role.МОДЕРАТОР: "Модератор"
-    }
-
-    return role_names.get(role, "Модератор")
 
 async def send_log(context: ContextTypes.DEFAULT_TYPE, log_text: str, parse_mode: str = 'HTML'):
     """Отправляет лог-сообщение в отдельный чат/канал"""
@@ -1438,7 +1412,7 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
         f"📊 Статистика: ✅{updated_stats['accepted']} | ❌{updated_stats['rejected']}\n"
         f"⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
     )
-    # await send_log(context, log_text)  # ОТКЛЮЧЕНО - логи только при наказаниях
+    await send_log(context, log_text)
 
     await query.edit_message_caption(
         caption=query.message.caption + f"\n\n{status_emoji} {status_text} (@{checker.username})",
@@ -1794,16 +1768,34 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
                 notification += f"\n\n🚫 <b>АВТОМУТ 12 ЧАСОВ</b>\n(3 варна)"
                 logger.info(f"Auto-muted user {violator_id} for 12h (3 warns)")
 
+        # ЛОГ ВАРНА В КАНАЛ
+        warn_count = get_active_warnings_count(violator_id) + 1
+
+        log_text = (
+            f"⚠️ <b>ВЫДАН ВАРН</b>\n\n"
+            f"👤 @{data['violator_username']} (ID: {violator_id})\n"
+            f"📋 {data['rule']}\n"
+            f"📊 Варнов: {warn_count}/3\n\n"
+            f"👨‍⚖️ Модератор: @{data['moderator_username']}\n"
+            f"✅ Одобрил: @{data['checker_username']}\n"
+            f"⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+        )
+
+        await send_log(context, log_text)
+        logger.info(f"📤 ЛОГ ВАРНА отправлен в канал!")
+
         msg = await context.bot.send_message(
             chat_id=f"@{PUBLIC_CHAT_USERNAME}",
             text=notification,
             parse_mode='HTML'
         )
 
+        # Удаление сообщения из публичного чата
+        # msg.chat.id = ID публичного чата (из ответа бота)
         asyncio.create_task(
-            delete_messages_after_delay(context, GROUP_CHAT_ID, [msg.message_id], PUNISHMENT_DELETE_SECONDS)
+            delete_messages_after_delay(context, msg.chat.id, [msg.message_id], PUNISHMENT_DELETE_SECONDS)
         )
-        logger.info(f"⏰ Удаление через {PUNISHMENT_DELETE_SECONDS}с: msg {msg.message_id}")
+        logger.info(f"⏰ Запланировано удаление msg {msg.message_id} из чата {msg.chat.id} через {PUNISHMENT_DELETE_SECONDS}с")
 
     except Exception as e:
         logger.error(f"Failed to execute punishment: {e}")

@@ -446,7 +446,7 @@ def remove_from_blacklist(user_id: int):
         return False
 
 async def delete_messages_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_ids: list, delay: int):
-    """Удаление сообщений после задержки"""
+    """Удаление сообщений"""
     await asyncio.sleep(delay)
     for msg_id in message_ids:
         try:

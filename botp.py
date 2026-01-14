@@ -62,9 +62,9 @@ USERS_ROLES = {
     'whysparky': Role.СЗМ,
     'maga8c': Role.АДМИН,
     'qwelex_z': Role.АДМИН,
-    'anayka_lol': Role.МЛ_АДМИН,
+    'matnozdra': Role.МЛ_АДМИН,
     'ml_admin2': Role.МЛ_АДМИН,
-    'matnozdra': Role.СТАРШИЙ_МОДЕРАТОР,
+    'stmoderator': Role.СТАРШИЙ_МОДЕРАТОР,
     'st_moder2': Role.СТАРШИЙ_МОДЕРАТОР,
     'breakbrosmiling': Role.МОДЕРАТОР,
     'bosspogranki': Role.МОДЕРАТОР,
@@ -1852,4 +1852,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 

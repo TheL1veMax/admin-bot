@@ -1438,7 +1438,7 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
         f"📊 Статистика: ✅{updated_stats['accepted']} | ❌{updated_stats['rejected']}\n"
         f"⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
     )
-    # await send_log(context, log_text)  # ОТКЛЮЧЕНО
+    # await send_log(context, log_text)  # ОТКЛЮЧЕНО - логи только при наказаниях
 
     await query.edit_message_caption(
         caption=query.message.caption + f"\n\n{status_emoji} {status_text} (@{checker.username})",

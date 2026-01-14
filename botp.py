@@ -14,7 +14,7 @@ import re
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = '8275792067:AAFkuxFjLrpsvInoheghSYIenRIqVLiBfCM'
+BOT_TOKEN = os.getenv('BOT_TOKEN')  # Берём из переменных окружения Railway
 GROUP_CHAT_ID = -1002418857530
 PUBLIC_CHAT_USERNAME = "pmkk_loves_chat"
 PUBLIC_CHAT_USERNAME = 'pmkk_loves_chat'
@@ -62,9 +62,9 @@ USERS_ROLES = {
     'whysparky': Role.СЗМ,
     'maga8c': Role.АДМИН,
     'qwelex_z': Role.АДМИН,
-    'matnozdra': Role.МЛ_АДМИН,
+    'anayka_lol': Role.МЛ_АДМИН,
     'ml_admin2': Role.МЛ_АДМИН,
-    'stmoderator': Role.СТАРШИЙ_МОДЕРАТОР,
+    'matnozdra': Role.СТАРШИЙ_МОДЕРАТОР,
     'st_moder2': Role.СТАРШИЙ_МОДЕРАТОР,
     'breakbrosmiling': Role.МОДЕРАТОР,
     'bosspogranki': Role.МОДЕРАТОР,
@@ -1852,5 +1852,4 @@ def main():
 
 if __name__ == '__main__':
     main()
-
 

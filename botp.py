@@ -16,13 +16,13 @@ logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 
-# ✅ ИСПРАВЛЕННЫЕ ID ЧАТОВ
+# ✅ ПРАВИЛЬНЫЕ ID ЧАТОВ
 ADMIN_GROUP_ID = -1002418857530  # Группа админов с кнопками
 PUBLIC_CHAT_ID = -1002901099291  # Публичный чат для уведомлений
 PUBLIC_CHAT_USERNAME = 'pmkk_loves_chat'
 DATABASE_URL = os.getenv('DATABASE_URL')
 # ID канала для логов
-LOG_CHANNEL_ID = -1002296028013
+LOG_CHANNEL_ID = -1003629150527
 
 MODERATOR_REPORT_TOPIC_ID = 14
 ADMIN_REPORT_TOPIC_ID = 13

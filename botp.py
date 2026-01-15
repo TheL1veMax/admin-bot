@@ -497,20 +497,13 @@ async def send_log(context: ContextTypes.DEFAULT_TYPE, log_text: str, parse_mode
 
 
 async def send_chat_notification(context: ContextTypes.DEFAULT_TYPE, text: str):
-    """Отправка уведомления в публичный чат с автоудалением через 2 минуты"""
+    """Отправка уведомления в публичный чат с автоудалением"""
     try:
-        msg = await context.bot.send_message(
-            chat_id=PUBLIC_CHAT_ID,
-            text=text,
-            parse_mode='HTML'
-        )
-        logger.info(f"📢 УВЕДОМЛЕНИЕ ОТПРАВЛЕНО В ЧАТ {PUBLIC_CHAT_ID}")
-
-        # Удалить через 2 минуты
+        msg = await context.bot.send_message(chat_id=PUBLIC_CHAT_ID, text=text, parse_mode='HTML')
+        logger.info(f"📢 Уведомление в чат {PUBLIC_CHAT_ID}")
         asyncio.create_task(delete_messages_after_delay(context, PUBLIC_CHAT_ID, [msg.message_id], PUNISHMENT_DELETE_SECONDS))
-
     except Exception as e:
-        logger.error(f"❌ Ошибка отправки уведомления в чат: {e}")
+        logger.error(f"❌ Ошибка уведомления: {e}")
 
 def get_user_role(username: str):
     if not username:
@@ -1477,7 +1470,8 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
                 pending_punishments[punishment_key] = {
                     'violator_id': violator_id,
                     'violator_username': parsed['violator'],
-                    'violator_name': violator_name or f"@{parsed['violator']}",
+                    'violator_name': violator_name or f"@{parsed['violator'],
+                'bot_message_id': query.message.message_id}",
                     'moderator_id': report['sender_id'],
                     'moderator_username': report['sender_username'],
                     'approver_id': checker.id,
@@ -1553,6 +1547,18 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
             f"⚠️ Наказание нужно выдать в соответствии с правилами"
         )
         await query.edit_message_text(manual_text, parse_mode='HTML')
+
+        # ✅ УДАЛЯЕМ ОБА СООБЩЕНИЯ через 2 минуты
+        messages_to_delete = [query.message.message_id]  # Сообщение бота "Выдайте вручную"
+
+        # Добавляем ID отчета с фото
+        if 'bot_message_id' in punishment_data:
+            messages_to_delete.append(punishment_data['bot_message_id'])
+
+        asyncio.create_task(delete_messages_after_delay(
+            context, ADMIN_GROUP_ID, messages_to_delete, PUNISHMENT_DELETE_SECONDS
+        ))
+        logger.info(f"🗑️ Удаление {len(messages_to_delete)} сообщений через 2 мин (manual)")
 
         # Логируем
         log_text = (
@@ -1696,7 +1702,7 @@ async def handle_punishment_duration(update: Update, context: ContextTypes.DEFAU
         )
         return
 
-    await execute_punishment(context, punishment_data, punishment_type, duration)
+    await execute_punishment(context, punishment_data, punishment_type, duration, query.message.message_id)
 
     punishment_name = "Мут" if punishment_type == 'mute' else "Бан"
     duration_text = "навсегда" if duration == 'forever' else duration
@@ -1728,7 +1734,7 @@ async def handle_duplicate_confirmation(update: Update, context: ContextTypes.DE
 
     punishment_data = pending_punishments[punishment_key]
 
-    await execute_punishment(context, punishment_data, punishment_type, duration)
+    await execute_punishment(context, punishment_data, punishment_type, duration, query.message.message_id)
 
     punishment_name = "Варн" if punishment_type == 'warn' else ("Мут" if punishment_type == 'mute' else "Бан")
     duration_text = "" if punishment_type == 'warn' else (" навсегда" if duration == 'forever' else f" {duration}")
@@ -1740,52 +1746,38 @@ async def handle_duplicate_confirmation(update: Update, context: ContextTypes.DE
     del pending_punishments[punishment_key]
 
 async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data: dict,
-                             punishment_type: str, duration: str):
-    """✅ ИСПРАВЛЕННАЯ - Выполнение наказания с отправкой логов и уведомлений"""
+                             punishment_type: str, duration: str, bot_message_id: int = None):
+    """✅ Выполнение наказания с автоудалением"""
     violator_id = punishment_data['violator_id']
     violator_username = punishment_data['violator_username']
     violator_name = punishment_data['violator_name']
     moderator_username = punishment_data['moderator_username']
     approver_username = punishment_data['approver_username']
-    approver_role = punishment_data.get('approver_role')
     rule = punishment_data['rule']
 
-    # Сохраняем в БД
-    add_punishment(
-        violator_id, violator_username, violator_name,
-        punishment_type, duration, rule,
-        punishment_data['moderator_id'], moderator_username,
-        punishment_data['approver_id'], approver_username
-    )
+    add_punishment(violator_id, violator_username, violator_name, punishment_type, duration, rule,
+                   punishment_data['moderator_id'], moderator_username,
+                   punishment_data['approver_id'], approver_username)
 
-    # Словари для форматирования
-    duration_text = {
-        '1h': '1 ч', '2h': '2 ч', '6h': '6 ч', '12h': '12 ч',
-        '1d': '1 д', '3d': '3 д', '7d': '7 д', '30d': '30 д',
-        'forever': 'навсегда', 'once': ''
-    }
+    duration_text = {'1h': '1 ч', '2h': '2 ч', '6h': '6 ч', '12h': '12 ч',
+                     '1d': '1 д', '3d': '3 д', '7d': '7 д', '30d': '30 д',
+                     'forever': 'навсегда', 'once': ''}
 
     duration_display = duration_text.get(duration, duration)
-
-    # Получаем роли
     moderator_role_name = get_user_role_name(moderator_username)
     approver_role_name = get_user_role_name(approver_username)
 
     try:
-        # Выполняем наказание
         if punishment_type == 'mute':
             until_date = calculate_until_date(duration)
             await context.bot.restrict_chat_member(
-                chat_id=PUBLIC_CHAT_ID,
-                user_id=violator_id,
-                permissions=ChatPermissions(can_send_messages=False),
-                until_date=until_date
+                chat_id=PUBLIC_CHAT_ID, user_id=violator_id,
+                permissions=ChatPermissions(can_send_messages=False), until_date=until_date
             )
-            logger.info(f"✅ МУТ ВЫДАН: user_id={violator_id}, duration={duration}")
+            logger.info(f"✅ МУТ: {violator_id}")
 
             end_date = "—" if duration == "forever" else datetime.fromtimestamp(until_date).strftime('%d.%m.%Y %H:%M') if until_date else "—"
 
-            # ЛОГ в канал
             log_text = f"""🔇 <b>ВЫДАН МУТ</b>
 
 👤 @{violator_username} (ID: {violator_id})
@@ -1797,7 +1789,6 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
 
             log_text += f"\n\n🎖 Ранг: {moderator_role_name} (@{moderator_username})"
 
-            # Если одобривший СЗА+, показываем username
             approver_role_enum = get_user_role(approver_username)
             if approver_role_enum and approver_role_enum >= Role.СЗА:
                 log_text += f"\n✅ Одобрил: {approver_role_name} (@{approver_username})"
@@ -1805,31 +1796,28 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
                 log_text += f"\n✅ Одобрил: {approver_role_name}"
 
             log_text += f"\n⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
-
             await send_log(context, log_text)
 
-            # УВЕДОМЛЕНИЕ в публичный чат
             chat_text = f"""🔇 <b>Мут {duration_display} выдан @{violator_username}</b>
 
 📜 Правило: {rule}
 🎖 Ранг: {moderator_role_name}
 
 ⏰ Удаляется через 2 минуты"""
-
             await send_chat_notification(context, chat_text)
+
+            admin_msg = await context.bot.send_message(
+                chat_id=ADMIN_GROUP_ID, text=f"✅ Мут {duration_display} выдан @{violator_username}", parse_mode='HTML'
+            )
+            asyncio.create_task(delete_messages_after_delay(context, ADMIN_GROUP_ID, [admin_msg.message_id], PUNISHMENT_DELETE_SECONDS))
 
         elif punishment_type == 'ban':
             until_date = calculate_until_date(duration)
-            await context.bot.ban_chat_member(
-                chat_id=PUBLIC_CHAT_ID,
-                user_id=violator_id,
-                until_date=until_date
-            )
-            logger.info(f"✅ БАН ВЫДАН: user_id={violator_id}, duration={duration}")
+            await context.bot.ban_chat_member(chat_id=PUBLIC_CHAT_ID, user_id=violator_id, until_date=until_date)
+            logger.info(f"✅ БАН: {violator_id}")
 
             end_date = "—" if duration == "forever" else datetime.fromtimestamp(until_date).strftime('%d.%m.%Y %H:%M') if until_date else "—"
 
-            # ЛОГ в канал
             log_text = f"""🚫 <b>ВЫДАН БАН</b>
 
 👤 @{violator_username} (ID: {violator_id})
@@ -1848,23 +1836,24 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
                 log_text += f"\n✅ Одобрил: {approver_role_name}"
 
             log_text += f"\n⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
-
             await send_log(context, log_text)
 
-            # УВЕДОМЛЕНИЕ в публичный чат
             chat_text = f"""🚫 <b>Бан {duration_display} выдан @{violator_username}</b>
 
 📜 Правило: {rule}
 🎖 Ранг: {moderator_role_name}
 
 ⏰ Удаляется через 2 минуты"""
-
             await send_chat_notification(context, chat_text)
+
+            admin_msg = await context.bot.send_message(
+                chat_id=ADMIN_GROUP_ID, text=f"✅ Бан {duration_display} выдан @{violator_username}", parse_mode='HTML'
+            )
+            asyncio.create_task(delete_messages_after_delay(context, ADMIN_GROUP_ID, [admin_msg.message_id], PUNISHMENT_DELETE_SECONDS))
 
         elif punishment_type == 'warn':
             warn_count = get_active_warnings_count(violator_id) + 1
 
-            # ЛОГ в канал
             log_text = f"""⚠️ <b>ВЫДАН ВАРН</b>
 
 👤 @{violator_username} (ID: {violator_id})
@@ -1880,42 +1869,42 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
                 log_text += f"\n✅ Одобрил: {approver_role_name}"
 
             log_text += f"\n⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
-
             await send_log(context, log_text)
 
-            # УВЕДОМЛЕНИЕ в публичный чат
             chat_text = f"""⚠️ <b>Предупреждение выдано @{violator_username}</b>
 
 📜 Правило: {rule}
 🎖 Ранг: {moderator_role_name}
 
 ⏰ Удаляется через 2 минуты"""
-
             await send_chat_notification(context, chat_text)
 
-            # Автомут при 3 варнах
+            admin_msg = await context.bot.send_message(
+                chat_id=ADMIN_GROUP_ID, text=f"✅ Варн выдан @{violator_username}", parse_mode='HTML'
+            )
+            asyncio.create_task(delete_messages_after_delay(context, ADMIN_GROUP_ID, [admin_msg.message_id], PUNISHMENT_DELETE_SECONDS))
+
             if warn_count >= MAX_WARNINGS:
                 auto_mute_until = calculate_until_date('12h')
                 await context.bot.restrict_chat_member(
-                    chat_id=PUBLIC_CHAT_ID,
-                    user_id=violator_id,
-                    permissions=ChatPermissions(can_send_messages=False),
-                    until_date=auto_mute_until
+                    chat_id=PUBLIC_CHAT_ID, user_id=violator_id,
+                    permissions=ChatPermissions(can_send_messages=False), until_date=auto_mute_until
                 )
-                logger.info(f"🚫 АВТОМУТ 12ч: user_id={violator_id} (3 варна)")
+                logger.info(f"🚫 АВТОМУТ 12ч: {violator_id}")
 
-                # Уведомление об автомуте
-                auto_mute_text = f"""🚫 <b>Автоматический мут 12 часов</b>
+                auto_mute_text = f"""🚫 <b>Автомут 12ч</b>
 
 👤 @{violator_username}
 📊 Причина: 3 варна
 
 ⏰ Удаляется через 2 минуты"""
-
                 await send_chat_notification(context, auto_mute_text)
 
+        if bot_message_id:
+            asyncio.create_task(delete_messages_after_delay(context, ADMIN_GROUP_ID, [bot_message_id], PUNISHMENT_DELETE_SECONDS))
+
     except Exception as e:
-        logger.error(f"❌ Ошибка выполнения наказания: {e}")
+        logger.error(f"❌ Ошибка наказания: {e}")
         raise
 
 

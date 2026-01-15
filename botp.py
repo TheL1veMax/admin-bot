@@ -1281,7 +1281,7 @@ async def reset_rejected_command(update: Update, context: ContextTypes.DEFAULT_T
 
 async def handle_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
-    if message.chat.id != GROUP_CHAT_ID or not message.photo:
+    if message.chat.id != ADMIN_GROUP_ID or not message.photo:
         return
 
     topic_id = message.message_thread_id
@@ -1509,7 +1509,7 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
                 )
 
     asyncio.create_task(
-        delete_messages_after_delay(context, GROUP_CHAT_ID, 
+        delete_messages_after_delay(context, ADMIN_GROUP_ID, 
                                    [report['user_message_id'], report['bot_message_id']], 
                                    DELETE_AFTER_SECONDS)
     )
@@ -1929,7 +1929,7 @@ async def handle_main_chat_message(update: Update, context: ContextTypes.DEFAULT
             return
         chat = message.chat
         user = message.from_user
-        is_main = chat.id == GROUP_CHAT_ID or (chat.username and chat.username.lower() == PUBLIC_CHAT_USERNAME.lower())
+        is_main = chat.id == ADMIN_GROUP_ID or (chat.username and chat.username.lower() == PUBLIC_CHAT_USERNAME.lower())
         if not is_main or user.is_bot:
             return
         user_display_name = get_display_name(user)

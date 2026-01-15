@@ -6,6 +6,7 @@ import os
 import asyncio
 import time
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from contextlib import contextmanager
@@ -20,6 +21,9 @@ ADMIN_GROUP_ID = -1002418857530
 PUBLIC_CHAT_ID = -1002901099291
 PUBLIC_CHAT_USERNAME = 'pmkk_loves_chat'
 DATABASE_URL = os.getenv('DATABASE_URL')
+
+# Timezone Москва
+MSK = ZoneInfo('Europe/Moscow')
 # ID канала
 LOG_CHANNEL_ID = -1003629150527
 
@@ -294,7 +298,7 @@ def calculate_until_date(duration: str):
     if duration == 'forever':
         return None
 
-    now = datetime.now()
+    now = datetime.now(MSK)
 
     duration_map = {
         '1h': timedelta(hours=1),
@@ -411,7 +415,7 @@ def add_to_blacklist(user_id: int, user_name: str, username: str, days: int, rea
     try:
         with get_db_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                end_date = datetime.now() + timedelta(days=days)
+                end_date = datetime.now(MSK) + timedelta(days=days)
 
                 cur.execute("UPDATE blacklist SET active = FALSE WHERE user_id = %s AND active = TRUE", (user_id,))
 
@@ -800,7 +804,7 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🆔 ID: {target_user_id}\n"
         f"📝 Причина: {reason}\n"
         f"👨‍💼 Выдал: @{issuer.username} ({issuer_role.name})\n"
-        f"⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+        f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
     )
     await send_log(context, log_text)
 
@@ -1014,7 +1018,7 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📝 Причина: {reason}\n"
         f"⏱ Срок: {days} дн. ({end_date.strftime('%d.%m.%Y')})\n"
         f"👨‍💼 Выдал: @{issuer.username} ({issuer_role.name})\n"
-        f"⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+        f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
     )
     await send_log(context, log_text)
 
@@ -1445,7 +1449,7 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
         f"🎖 Роль: {report['sender_role']}\n"
         f"👨‍💼 Проверил: {checker_display} (@{checker.username})\n"
         f"📊 Статистика: ✅{updated_stats['accepted']} | ❌{updated_stats['rejected']}\n"
-        f"⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+        f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
     )
     await send_log(context, log_text)
 
@@ -1475,7 +1479,8 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
                     'approver_role': checker_role,
                     'rule': parsed['rule'],
                     'recommendation': parsed['recommendation'] or ''
-                }
+                ,
+                    'bot_message_id': query.message.message_id}
 
                 keyboard = [
                     [InlineKeyboardButton("🔇 Мут", callback_data=f"punish_mute_{report_id}")],
@@ -1557,7 +1562,7 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
             f"💡 Рекомендация: {punishment_data.get('recommendation') or 'Не указана'}\n"
             f"👨‍💼 Модератор: @{punishment_data['moderator_username']}\n"
             f"✅ Решение принял: @{query.from_user.username}\n"
-            f"⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+            f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
         )
         await send_log(context, log_text)
 
@@ -1583,7 +1588,7 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
         duplicate = check_duplicate_punishment(violator_id, rule, 'warn', 'once')
 
         if duplicate:
-            days_ago = (datetime.now() - duplicate['created_at']).days
+            days_ago = (datetime.now(MSK) - duplicate['created_at']).days
             keyboard = [[
                 InlineKeyboardButton("✅ Да", callback_data=f"confirm_duplicate_warn_{report_id}"),
                 InlineKeyboardButton("❌ Нет", callback_data=f"cancel_punishment_{report_id}")
@@ -1666,7 +1671,7 @@ async def handle_punishment_duration(update: Update, context: ContextTypes.DEFAU
     duplicate = check_duplicate_punishment(violator_id, rule, punishment_type, duration)
 
     if duplicate:
-        days_ago = (datetime.now() - duplicate['created_at']).days
+        days_ago = (datetime.now(MSK) - duplicate['created_at']).days
         keyboard = [[
             InlineKeyboardButton("✅ Да", callback_data=f"confirm_duplicate_{punishment_type}_{duration}_{report_id}"),
             InlineKeyboardButton("❌ Нет", callback_data=f"cancel_punishment_{report_id}")
@@ -1691,7 +1696,7 @@ async def handle_punishment_duration(update: Update, context: ContextTypes.DEFAU
         )
         return
 
-    await execute_punishment(context, punishment_data, punishment_type, duration, query.message.message_id)
+    await execute_punishment(context, punishment_data, punishment_type, duration)
 
     punishment_name = "Мут" if punishment_type == 'mute' else "Бан"
     duration_text = "навсегда" if duration == 'forever' else duration
@@ -1723,7 +1728,7 @@ async def handle_duplicate_confirmation(update: Update, context: ContextTypes.DE
 
     punishment_data = pending_punishments[punishment_key]
 
-    await execute_punishment(context, punishment_data, punishment_type, duration, query.message.message_id)
+    await execute_punishment(context, punishment_data, punishment_type, duration)
 
     punishment_name = "Варн" if punishment_type == 'warn' else ("Мут" if punishment_type == 'mute' else "Бан")
     duration_text = "" if punishment_type == 'warn' else (" навсегда" if duration == 'forever' else f" {duration}")
@@ -1734,7 +1739,7 @@ async def handle_duplicate_confirmation(update: Update, context: ContextTypes.DE
 
     del pending_punishments[punishment_key]
 
-async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data: dict, punishment_type: str, duration: str, bot_message_id: int = None):
+async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data: dict, punishment_type: str, duration: str, bot_message_id: int = None, topic_id: int = None):
     violator_id = punishment_data['violator_id']
     violator_username = punishment_data['violator_username']
     violator_name = punishment_data['violator_name']
@@ -1753,7 +1758,7 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
         if punishment_type == 'mute':
             until_date = calculate_until_date(duration)
             await context.bot.restrict_chat_member(chat_id=PUBLIC_CHAT_ID, user_id=violator_id, permissions=ChatPermissions(can_send_messages=False), until_date=until_date)
-            end_date_str = "—" if duration == "forever" else datetime.fromtimestamp(until_date).strftime('%d.%m.%Y %H:%M') if until_date else "—"
+            end_date_str = "—" if duration == "forever" else datetime.fromtimestamp(until_date, tz=MSK).strftime('%d.%m.%Y %H:%M') if until_date else "—"
             log_msg = f"🔇 <b>МУТ</b>\n\n👤 @{violator_username} (ID: {violator_id})\n📋 Правило: {rule}\n⏱ {duration_display}"
             if duration != "forever":
                 log_msg += f"\n🔚 До: {end_date_str}"
@@ -1763,16 +1768,16 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
                 log_msg += f"\n✅ {approver_role_name} (@{approver_username})"
             else:
                 log_msg += f"\n✅ {approver_role_name}"
-            log_msg += f"\n⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+            log_msg += f"\n⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
             await send_log(context, log_msg)
             chat_msg = f"🔇 <b>Мут {duration_display} выдан @{violator_username}</b>\n\n📜 {rule}\n🎖 {moderator_role_name}\n\n⏰ Удаляется через 2 минуты"
             await send_chat_notification(context, chat_msg)
-            admin_msg = await context.bot.send_message(chat_id=ADMIN_GROUP_ID, text=f"✅ Мут {duration_display} выдан @{violator_username}", parse_mode='HTML')
+            admin_msg = await context.bot.send_message(chat_id=ADMIN_GROUP_ID, message_thread_id=topic_id, text=f"✅ Мут {duration_display} выдан @{violator_username}", parse_mode='HTML')
             asyncio.create_task(delete_messages_after_delay(context, ADMIN_GROUP_ID, [admin_msg.message_id], PUNISHMENT_DELETE_SECONDS))
         elif punishment_type == 'ban':
             until_date = calculate_until_date(duration)
             await context.bot.ban_chat_member(chat_id=PUBLIC_CHAT_ID, user_id=violator_id, until_date=until_date)
-            end_date_str = "—" if duration == "forever" else datetime.fromtimestamp(until_date).strftime('%d.%m.%Y %H:%M') if until_date else "—"
+            end_date_str = "—" if duration == "forever" else datetime.fromtimestamp(until_date, tz=MSK).strftime('%d.%m.%Y %H:%M') if until_date else "—"
             log_msg = f"🚫 <b>БАН</b>\n\n👤 @{violator_username} (ID: {violator_id})\n📋 Правило: {rule}\n⏱ {duration_display}"
             if duration != "forever":
                 log_msg += f"\n🔚 До: {end_date_str}"
@@ -1782,11 +1787,11 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
                 log_msg += f"\n✅ {approver_role_name} (@{approver_username})"
             else:
                 log_msg += f"\n✅ {approver_role_name}"
-            log_msg += f"\n⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+            log_msg += f"\n⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
             await send_log(context, log_msg)
             chat_msg = f"🚫 <b>Бан {duration_display} выдан @{violator_username}</b>\n\n📜 {rule}\n🎖 {moderator_role_name}\n\n⏰ Удаляется через 2 минуты"
             await send_chat_notification(context, chat_msg)
-            admin_msg = await context.bot.send_message(chat_id=ADMIN_GROUP_ID, text=f"✅ Бан {duration_display} выдан @{violator_username}", parse_mode='HTML')
+            admin_msg = await context.bot.send_message(chat_id=ADMIN_GROUP_ID, message_thread_id=topic_id, text=f"✅ Бан {duration_display} выдан @{violator_username}", parse_mode='HTML')
             asyncio.create_task(delete_messages_after_delay(context, ADMIN_GROUP_ID, [admin_msg.message_id], PUNISHMENT_DELETE_SECONDS))
         elif punishment_type == 'warn':
             warn_count = get_active_warnings_count(violator_id) + 1
@@ -1796,11 +1801,11 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
                 log_msg += f"\n✅ {approver_role_name} (@{approver_username})"
             else:
                 log_msg += f"\n✅ {approver_role_name}"
-            log_msg += f"\n⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+            log_msg += f"\n⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
             await send_log(context, log_msg)
             chat_msg = f"⚠️ <b>Предупреждение @{violator_username}</b>\n\n📜 {rule}\n🎖 {moderator_role_name}\n\n⏰ Удаляется через 2 минуты"
             await send_chat_notification(context, chat_msg)
-            admin_msg = await context.bot.send_message(chat_id=ADMIN_GROUP_ID, text=f"✅ Варн выдан @{violator_username}", parse_mode='HTML')
+            admin_msg = await context.bot.send_message(chat_id=ADMIN_GROUP_ID, message_thread_id=topic_id, text=f"✅ Варн выдан @{violator_username}", parse_mode='HTML')
             asyncio.create_task(delete_messages_after_delay(context, ADMIN_GROUP_ID, [admin_msg.message_id], PUNISHMENT_DELETE_SECONDS))
             if warn_count >= MAX_WARNINGS:
                 auto_mute_until = calculate_until_date('12h')

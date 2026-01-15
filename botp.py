@@ -20,7 +20,7 @@ BOT_TOKEN = os.getenv('BOT_TOKEN')
 ADMIN_GROUP_ID = -1002418857530
 PUBLIC_CHAT_ID = -1002901099291
 PUBLIC_CHAT_USERNAME = 'pmkk_loves_chat'
-ANNOUNCEMENTS_TOPIC_ID = 2977  # ЗАМЕНИ!
+ANNOUNCEMENTS_TOPIC_ID = 2 
 DATABASE_URL = os.getenv('DATABASE_URL')
 MSK = ZoneInfo('Europe/Moscow')
 # ID канала для логов
@@ -2019,3 +2019,4 @@ if __name__ == '__main__':
         logger.info(f"⏰ Принятый отчёт будет удалён через 2 мин")
 
     app.add_handler(CommandHandler('obv', announcement_command))
+

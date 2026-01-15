@@ -15,12 +15,14 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-GROUP_CHAT_ID = -1002418857530
-PUBLIC_CHAT_USERNAME = "pmkk_loves_chat"
+
+# ✅ ИСПРАВЛЕННЫЕ ID ЧАТОВ
+ADMIN_GROUP_ID = -1002418857530  # Группа админов с кнопками
+PUBLIC_CHAT_ID = -1002901099291  # Публичный чат для уведомлений
 PUBLIC_CHAT_USERNAME = 'pmkk_loves_chat'
 DATABASE_URL = os.getenv('DATABASE_URL')
 # ID канала для логов
-LOGS_CHAT_ID = -1003629150527
+LOG_CHANNEL_ID = -1002296028013
 
 MODERATOR_REPORT_TOPIC_ID = 14
 ADMIN_REPORT_TOPIC_ID = 13
@@ -486,12 +488,29 @@ async def send_log(context: ContextTypes.DEFAULT_TYPE, log_text: str, parse_mode
     """Отправляет лог-сообщение в отдельный чат/канал"""
     try:
         await context.bot.send_message(
-            chat_id=LOGS_CHAT_ID,
+            chat_id=LOG_CHANNEL_ID,
             text=log_text,
             parse_mode=parse_mode
         )
     except Exception as e:
         logger.error(f"Не удалось отправить лог: {e}")
+
+
+async def send_chat_notification(context: ContextTypes.DEFAULT_TYPE, text: str):
+    """Отправка уведомления в публичный чат с автоудалением через 2 минуты"""
+    try:
+        msg = await context.bot.send_message(
+            chat_id=PUBLIC_CHAT_ID,
+            text=text,
+            parse_mode='HTML'
+        )
+        logger.info(f"📢 УВЕДОМЛЕНИЕ ОТПРАВЛЕНО В ЧАТ {PUBLIC_CHAT_ID}")
+
+        # Удалить через 2 минуты
+        asyncio.create_task(delete_messages_after_delay(context, PUBLIC_CHAT_ID, [msg.message_id], PUNISHMENT_DELETE_SECONDS))
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка отправки уведомления в чат: {e}")
 
 def get_user_role(username: str):
     if not username:
@@ -691,7 +710,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
-    if message.chat.id != GROUP_CHAT_ID:
+    if message.chat.id != ADMIN_GROUP_ID:
         await message.reply_text("❌ Только в группе!")
         return
 
@@ -779,7 +798,7 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         warning_message += f"🚫 <b>КРИТИЧНО!</b>\n@{DEPUTY_ADMIN_USERNAME} исключение!"
 
     await context.bot.send_message(
-        chat_id=GROUP_CHAT_ID,
+        chat_id=ADMIN_GROUP_ID,
         message_thread_id=WARNINGS_TOPIC_ID,
         text=warning_message,
         parse_mode='HTML'
@@ -800,7 +819,7 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
-    if message.chat.id != GROUP_CHAT_ID:
+    if message.chat.id != ADMIN_GROUP_ID:
         await message.reply_text("❌ Только в группе!")
         return
 
@@ -877,7 +896,7 @@ async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_T
     )
 
     await context.bot.send_message(
-        chat_id=GROUP_CHAT_ID,
+        chat_id=ADMIN_GROUP_ID,
         message_thread_id=WARNINGS_TOPIC_ID,
         text=remove_message,
         parse_mode='HTML'
@@ -888,7 +907,7 @@ async def remove_warning_command(update: Update, context: ContextTypes.DEFAULT_T
 
 async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
-    if message.chat.id != GROUP_CHAT_ID:
+    if message.chat.id != ADMIN_GROUP_ID:
         return
 
     issuer = message.from_user
@@ -992,7 +1011,7 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     await context.bot.send_message(
-        chat_id=GROUP_CHAT_ID,
+        chat_id=ADMIN_GROUP_ID,
         message_thread_id=BLACKLIST_TOPIC_ID,
         text=bl_message,
         parse_mode='HTML'
@@ -1014,7 +1033,7 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def unblacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
-    if message.chat.id != GROUP_CHAT_ID:
+    if message.chat.id != ADMIN_GROUP_ID:
         return
 
     issuer = message.from_user
@@ -1085,7 +1104,7 @@ async def unblacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     ubl_message = f"✅ <b>УДАЛЕН ИЗ ЧС</b>\n\n👤 {user_link}\n👨‍💼 {issuer.mention_html()}"
 
     await context.bot.send_message(
-        chat_id=GROUP_CHAT_ID,
+        chat_id=ADMIN_GROUP_ID,
         message_thread_id=BLACKLIST_TOPIC_ID,
         text=ubl_message,
         parse_mode='HTML'
@@ -1096,7 +1115,7 @@ async def unblacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def reset_accepted_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
-    if message.chat.id != GROUP_CHAT_ID:
+    if message.chat.id != ADMIN_GROUP_ID:
         return
 
     issuer = message.from_user
@@ -1179,7 +1198,7 @@ async def reset_accepted_command(update: Update, context: ContextTypes.DEFAULT_T
 
 async def reset_rejected_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
-    if message.chat.id != GROUP_CHAT_ID:
+    if message.chat.id != ADMIN_GROUP_ID:
         return
 
     issuer = message.from_user
@@ -1312,7 +1331,7 @@ async def handle_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         bot_message = await context.bot.send_photo(
-            chat_id=GROUP_CHAT_ID,
+            chat_id=ADMIN_GROUP_ID,
             message_thread_id=topic_id,
             photo=photo,
             caption=report_message,
@@ -1421,7 +1440,7 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
     )
 
     await context.bot.send_photo(
-        chat_id=GROUP_CHAT_ID,
+        chat_id=ADMIN_GROUP_ID,
         message_thread_id=target_topic_id,
         photo=report['photo'],
         caption=final_caption,
@@ -1452,7 +1471,7 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
             violator_username = parsed['violator']
             violator_id, violator_name = find_user_id_by_username(violator_username)
             if not violator_id:
-                await context.bot.send_message(chat_id=LOGS_CHAT_ID, text=f"⚠️ @{violator_username} НЕ НАЙДЕН В БАЗЕ", parse_mode='HTML')
+                await context.bot.send_message(chat_id=LOG_CHANNEL_ID, text=f"⚠️ @{violator_username} НЕ НАЙДЕН В БАЗЕ", parse_mode='HTML')
             if violator_id:
                 punishment_key = f"punishment_{report_id}"
                 pending_punishments[punishment_key] = {
@@ -1720,9 +1739,9 @@ async def handle_duplicate_confirmation(update: Update, context: ContextTypes.DE
 
     del pending_punishments[punishment_key]
 
-async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data: dict, 
-                            punishment_type: str, duration: str):
-
+async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data: dict,
+                             punishment_type: str, duration: str):
+    """✅ ИСПРАВЛЕННАЯ - Выполнение наказания с отправкой логов и уведомлений"""
     violator_id = punishment_data['violator_id']
     violator_username = punishment_data['violator_username']
     violator_name = punishment_data['violator_name']
@@ -1731,6 +1750,7 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
     approver_role = punishment_data.get('approver_role')
     rule = punishment_data['rule']
 
+    # Сохраняем в БД
     add_punishment(
         violator_id, violator_username, violator_name,
         punishment_type, duration, rule,
@@ -1738,177 +1758,166 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
         punishment_data['approver_id'], approver_username
     )
 
-    punishment_emoji = {
-        'mute': '🚫',
-        'warn': '⚠️',
-        'ban': '🔒'
-    }
-
-    punishment_name = {
-        'mute': 'мут',
-        'warn': 'варн',
-        'ban': 'бан'
-    }
-
+    # Словари для форматирования
     duration_text = {
-        '1h': '1 час',
-        '2h': '2 часа',
-        '6h': '6 часов',
-        '12h': '12 часов',
-        '1d': '1 день',
-        '3d': '3 дня',
-        '7d': '7 дней',
-        '30d': '30 дней',
-        'forever': 'навсегда',
-        'once': ''
+        '1h': '1 ч', '2h': '2 ч', '6h': '6 ч', '12h': '12 ч',
+        '1d': '1 д', '3d': '3 д', '7d': '7 д', '30d': '30 д',
+        'forever': 'навсегда', 'once': ''
     }
 
-    duration_display = f" {duration_text.get(duration, duration)}" if duration != 'once' else ""
+    duration_display = duration_text.get(duration, duration)
 
-    approver_display = f"@{approver_username}" if approver_role >= Role.СЗА else approver_role.name
-
-    notification = (
-        f"{punishment_emoji[punishment_type]} @{violator_username} получил {punishment_name[punishment_type]}{duration_display}\n"
-        f"📝 Правило: {rule}\n"
-        f"👮 Модератор: @{moderator_username}\n"
-        f"✅ Одобрил: {approver_display}"
-    )
+    # Получаем роли
+    moderator_role_name = get_user_role_name(moderator_username)
+    approver_role_name = get_user_role_name(approver_username)
 
     try:
+        # Выполняем наказание
         if punishment_type == 'mute':
             until_date = calculate_until_date(duration)
             await context.bot.restrict_chat_member(
-                chat_id=f'@{PUBLIC_CHAT_USERNAME}',
+                chat_id=PUBLIC_CHAT_ID,
                 user_id=violator_id,
                 permissions=ChatPermissions(can_send_messages=False),
                 until_date=until_date
             )
-            logger.info(f"Muted user {violator_id} for {duration}")
+            logger.info(f"✅ МУТ ВЫДАН: user_id={violator_id}, duration={duration}")
 
-            # ЛОГ МУТА в канал
-            duration_text = "Навсегда" if duration == "forever" else duration
-            end_date_ts = until_date if until_date else 0
-            end_date = "—" if duration == "forever" else datetime.fromtimestamp(end_date_ts).strftime('%d.%m.%Y %H:%M')
+            end_date = "—" if duration == "forever" else datetime.fromtimestamp(until_date).strftime('%d.%m.%Y %H:%M') if until_date else "—"
 
-            moderator_role = get_user_role_name(callback_data.get('moderator_username', ''))
-            checker_role = get_user_role_name(callback_data.get('checker_username', ''))
+            # ЛОГ в канал
+            log_text = f"""🔇 <b>ВЫДАН МУТ</b>
 
-            log_text = (
-                f"🔇 <b>ВЫДАН МУТ</b>\n\n"
-                f"👤 @{callback_data.get('violator_username', 'unknown')} (ID: {violator_id})\n"
-                f"📋 Правило: {callback_data.get('rule', 'Не указано')}\n"
-                f"⏱ Длительность: {duration_text}\n"
-            )
+👤 @{violator_username} (ID: {violator_id})
+📋 Правило: {rule}
+⏱ Длительность: {duration_display}"""
+
             if duration != "forever":
-                log_text += f"🔚 До: {end_date}\n"
+                log_text += f"\n🔚 До: {end_date}"
 
-            log_text += (
-                f"\n🎖 Ранг: {moderator_role} (@{callback_data.get('moderator_username', 'unknown')})\n"
-            )
+            log_text += f"\n\n🎖 Ранг: {moderator_role_name} (@{moderator_username})"
 
-            checker_username = callback_data.get('checker_username', '').lower()
-            checker_role_enum = USERS_ROLES.get(checker_username)
-            if checker_role_enum and checker_role_enum >= Role.СЗА:
-                log_text += f"✅ Одобрил: {checker_role} (@{callback_data.get('checker_username', 'unknown')})\n"
+            # Если одобривший СЗА+, показываем username
+            approver_role_enum = get_user_role(approver_username)
+            if approver_role_enum and approver_role_enum >= Role.СЗА:
+                log_text += f"\n✅ Одобрил: {approver_role_name} (@{approver_username})"
             else:
-                log_text += f"✅ Одобрил: {checker_role}\n"
+                log_text += f"\n✅ Одобрил: {approver_role_name}"
 
-            log_text += f"⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+            log_text += f"\n⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
 
             await send_log(context, log_text)
+
+            # УВЕДОМЛЕНИЕ в публичный чат
+            chat_text = f"""🔇 <b>Мут {duration_display} выдан @{violator_username}</b>
+
+📜 Правило: {rule}
+🎖 Ранг: {moderator_role_name}
+
+⏰ Удаляется через 2 минуты"""
+
+            await send_chat_notification(context, chat_text)
 
         elif punishment_type == 'ban':
             until_date = calculate_until_date(duration)
             await context.bot.ban_chat_member(
-                chat_id=f'@{PUBLIC_CHAT_USERNAME}',
+                chat_id=PUBLIC_CHAT_ID,
                 user_id=violator_id,
                 until_date=until_date
             )
-            logger.info(f"Banned user {violator_id} for {duration}")
+            logger.info(f"✅ БАН ВЫДАН: user_id={violator_id}, duration={duration}")
 
-            # ЛОГ БАНА в канал
-            duration_text = "Навсегда" if duration == "forever" else duration
-            end_date_ts = until_date if until_date else 0
-            end_date = "—" if duration == "forever" else datetime.fromtimestamp(end_date_ts).strftime('%d.%m.%Y %H:%M')
+            end_date = "—" if duration == "forever" else datetime.fromtimestamp(until_date).strftime('%d.%m.%Y %H:%M') if until_date else "—"
 
-            moderator_role = get_user_role_name(callback_data.get('moderator_username', ''))
-            checker_role = get_user_role_name(callback_data.get('checker_username', ''))
+            # ЛОГ в канал
+            log_text = f"""🚫 <b>ВЫДАН БАН</b>
 
-            log_text = (
-                f"🚫 <b>ВЫДАН БАН</b>\n\n"
-                f"👤 @{callback_data.get('violator_username', 'unknown')} (ID: {violator_id})\n"
-                f"📋 Правило: {callback_data.get('rule', 'Не указано')}\n"
-                f"⏱ Длительность: {duration_text}\n"
-            )
+👤 @{violator_username} (ID: {violator_id})
+📋 Правило: {rule}
+⏱ Длительность: {duration_display}"""
+
             if duration != "forever":
-                log_text += f"🔚 До: {end_date}\n"
+                log_text += f"\n🔚 До: {end_date}"
 
-            log_text += (
-                f"\n🎖 Ранг: {moderator_role} (@{callback_data.get('moderator_username', 'unknown')})\n"
-            )
+            log_text += f"\n\n🎖 Ранг: {moderator_role_name} (@{moderator_username})"
 
-            checker_username = callback_data.get('checker_username', '').lower()
-            checker_role_enum = USERS_ROLES.get(checker_username)
-            if checker_role_enum and checker_role_enum >= Role.СЗА:
-                log_text += f"✅ Одобрил: {checker_role} (@{callback_data.get('checker_username', 'unknown')})\n"
+            approver_role_enum = get_user_role(approver_username)
+            if approver_role_enum and approver_role_enum >= Role.СЗА:
+                log_text += f"\n✅ Одобрил: {approver_role_name} (@{approver_username})"
             else:
-                log_text += f"✅ Одобрил: {checker_role}\n"
+                log_text += f"\n✅ Одобрил: {approver_role_name}"
 
-            log_text += f"⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+            log_text += f"\n⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
 
             await send_log(context, log_text)
 
+            # УВЕДОМЛЕНИЕ в публичный чат
+            chat_text = f"""🚫 <b>Бан {duration_display} выдан @{violator_username}</b>
+
+📜 Правило: {rule}
+🎖 Ранг: {moderator_role_name}
+
+⏰ Удаляется через 2 минуты"""
+
+            await send_chat_notification(context, chat_text)
+
         elif punishment_type == 'warn':
-            warn_count = get_active_warnings_count(violator_id)
+            warn_count = get_active_warnings_count(violator_id) + 1
+
+            # ЛОГ в канал
+            log_text = f"""⚠️ <b>ВЫДАН ВАРН</b>
+
+👤 @{violator_username} (ID: {violator_id})
+📋 Правило: {rule}
+📊 Варнов: {warn_count}/{MAX_WARNINGS}
+
+🎖 Ранг: {moderator_role_name} (@{moderator_username})"""
+
+            approver_role_enum = get_user_role(approver_username)
+            if approver_role_enum and approver_role_enum >= Role.СЗА:
+                log_text += f"\n✅ Одобрил: {approver_role_name} (@{approver_username})"
+            else:
+                log_text += f"\n✅ Одобрил: {approver_role_name}"
+
+            log_text += f"\n⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+
+            await send_log(context, log_text)
+
+            # УВЕДОМЛЕНИЕ в публичный чат
+            chat_text = f"""⚠️ <b>Предупреждение выдано @{violator_username}</b>
+
+📜 Правило: {rule}
+🎖 Ранг: {moderator_role_name}
+
+⏰ Удаляется через 2 минуты"""
+
+            await send_chat_notification(context, chat_text)
+
+            # Автомут при 3 варнах
             if warn_count >= MAX_WARNINGS:
                 auto_mute_until = calculate_until_date('12h')
                 await context.bot.restrict_chat_member(
-                    chat_id=f'@{PUBLIC_CHAT_USERNAME}',
+                    chat_id=PUBLIC_CHAT_ID,
                     user_id=violator_id,
                     permissions=ChatPermissions(can_send_messages=False),
                     until_date=auto_mute_until
                 )
-                notification += f"\n\n🚫 <b>АВТОМУТ 12 ЧАСОВ</b>\n(3 варна)"
-                logger.info(f"Auto-muted user {violator_id} for 12h (3 warns)")
+                logger.info(f"🚫 АВТОМУТ 12ч: user_id={violator_id} (3 варна)")
 
-        # ЛОГ ВАРНА в канал
-        warn_count = get_active_warnings_count(violator_id)
-        moderator_role = get_user_role_name(callback_data.get('moderator_username', ''))
-        checker_role = get_user_role_name(callback_data.get('checker_username', ''))
+                # Уведомление об автомуте
+                auto_mute_text = f"""🚫 <b>Автоматический мут 12 часов</b>
 
-        log_text = (
-            f"⚠️ <b>ВЫДАН ВАРН</b>\n\n"
-            f"👤 @{callback_data.get('violator_username', 'unknown')} (ID: {violator_id})\n"
-            f"📋 {callback_data.get('rule', 'Не указано')}\n"
-            f"📊 Варнов: {warn_count}/3\n\n"
-            f"🎖 Ранг: {moderator_role} (@{callback_data.get('moderator_username', 'unknown')})\n"
-        )
+👤 @{violator_username}
+📊 Причина: 3 варна
 
-        checker_username = callback_data.get('checker_username', '').lower()
-        checker_role_enum = USERS_ROLES.get(checker_username)
-        if checker_role_enum and checker_role_enum >= Role.СЗА:
-            log_text += f"✅ Одобрил: {checker_role} (@{callback_data.get('checker_username', 'unknown')})\n"
-        else:
-            log_text += f"✅ Одобрил: {checker_role}\n"
+⏰ Удаляется через 2 минуты"""
 
-        log_text += f"⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"
-
-        await send_log(context, log_text)
-
-        msg = await context.bot.send_message(
-            chat_id=f"@{PUBLIC_CHAT_USERNAME}",
-            text=notification,
-            parse_mode='HTML'
-        )
-
-        # Удаление уведомления из публичного чата
-        asyncio.create_task(
-            delete_messages_after_delay(context, msg.chat.id, [msg.message_id], PUNISHMENT_DELETE_SECONDS)
-        )
-        logger.info(f"⏰ Уведомление будет удалено через {PUNISHMENT_DELETE_SECONDS}с")
+                await send_chat_notification(context, auto_mute_text)
 
     except Exception as e:
-        logger.error(f"Failed to execute punishment: {e}")
+        logger.error(f"❌ Ошибка выполнения наказания: {e}")
+        raise
+
 
 async def handle_main_chat_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Автосохранение пользователей"""

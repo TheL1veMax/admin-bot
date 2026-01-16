@@ -65,7 +65,7 @@ USERS_ROLES = {
     'mskmboky': Role.СТАРШИЙ_АДМИН,
     'whysparky': Role.СЗМ,
     'maga8c': Role.АДМИН,
-    'qwelex_z': Role.АДМИН,
+    'qwelex_z': Role.КУРАТОРАДМИНИСТРАЦИИ,
     'anayka_lol': Role.МЛ_АДМИН,
     'matnozdra': Role.МЛ_АДМИН,
     'stmoder': Role.СТАРШИЙ_МОДЕРАТОР,

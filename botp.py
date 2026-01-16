@@ -1380,57 +1380,50 @@ async def handle_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error: {e}")
 
 async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка нажатий на кнопки"""
     query = update.callback_query
     await query.answer()
 
     data = query.data
 
-    # Проверка на обжалование ПЕРВОЙ - с правильным отступом!
-    if data.startswith('appeal'):
-        await handle_appeal_callback(update, context)
-        return
-
-    if data.startswith('accept') or data.startswith('reject'):
-        await handle_report_decision(update, context)
-    elif data.startswith('punish'):
-        await handle_punishment_type(update, context)
-    elif data.startswith('duration'):
-        await handle_punishment_duration(update, context)
-    elif data.startswith('confirm_duplicate'):
-        await handle_duplicate_confirmation(update, context)
-    elif data.startswith('back_punishment'):
-        report_id = data.split('_')[-1]
-        punishment_key = f"punishment_{report_id}"
-
-        if punishment_key not in pending_punishments:
-            await query.answer("⚠️ Данные устарели!", show_alert=True)
+        if data.startswith('appeal'):
+            await handle_appeal_callback(update, context)
             return
 
+    if data.startswith('accept_') or data.startswith('reject_'):
+        await handle_report_decision(update, context)
+    elif data.startswith('punish_'):
+        await handle_punishment_type(update, context)
+    elif data.startswith('duration_'):
+        await handle_punishment_duration(update, context)
+    elif data.startswith('confirm_duplicate_'):
+        await handle_duplicate_confirmation(update, context)
+    elif data.startswith('back_punishment_'):
+        report_id = data.split('_')[-1]
+        punishment_key = f"punishment_{report_id}"
+        if punishment_key not in pending_punishments:
+            await query.answer("❌ Данные не найдены!", show_alert=True)
+            return
         punishment_data = pending_punishments[punishment_key]
 
         keyboard = [
             [InlineKeyboardButton("🔇 Мут", callback_data=f"punish_mute_{report_id}")],
-            [InlineKeyboardButton("⚠️ Предупреждение", callback_data=f"punish_warn_{report_id}")],
+            [InlineKeyboardButton("⚠️ Варн", callback_data=f"punish_warn_{report_id}")],
             [InlineKeyboardButton("🚫 Бан", callback_data=f"punish_ban_{report_id}")],
-            [InlineKeyboardButton("📝 Ручное наказание", callback_data=f"punish_manual_{report_id}")]
+            [InlineKeyboardButton("✋ Выдать вручную", callback_data=f"punish_manual_{report_id}")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-
-        punishment_text = f"⚖️ Выберите наказание\n\n"
-        punishment_text += f"👤 Нарушитель: {punishment_data['violator_username']}\n"
-        punishment_text += f"📋 Правило: {punishment_data['rule']}\n"
-        punishment_text += f"💡 Рекомендация: {punishment_data.get('recommendation') or 'Не указана'}"
-
+        punishment_text = (
+            f"⚖️ Выберите наказание\n\n"
+            f"👤 Нарушитель: @{punishment_data['violator_username']}\n"
+            f"📋 Правило: {punishment_data['rule']}\n"
+            f"💡 Рекомендация: {punishment_data.get('recommendation') or 'не указана'}"
+        )
         await query.edit_message_text(punishment_text, parse_mode='HTML', reply_markup=reply_markup)
-
-    elif data.startswith('cancel_punishment'):
+    elif data.startswith('cancel_punishment_'):
         punishment_key = f"punishment_{data.split('_')[-1]}"
         if punishment_key in pending_punishments:
             del pending_punishments[punishment_key]
-        await query.edit_message_text("❌ Наказание отменено")
-
-
+        await query.edit_message_text("❌ Отменено")
 
 async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1922,32 +1915,30 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
             logger.info(f"Muted user {violator_id} for {duration}")
 
             # ЛОГ МУТА в канал
-            duration_text = "Навсегда" if duration == "forever" else duration
+            duration_text_log = "Навсегда" if duration == "forever" else duration
             end_date_ts = until_date if until_date else 0
             end_date = "—" if duration == "forever" else datetime.fromtimestamp(end_date_ts).strftime('%d.%m.%Y %H:%M')
 
-            moderator_role = get_user_role_name(callback_data.get('moderator_username', ''))
-            checker_role = get_user_role_name(callback_data.get('checker_username', ''))
+            moderator_role = get_user_role_name(moderator_username)
+            approver_role_name = get_user_role_name(approver_username)
 
             log_text = (
                 f"🔇 <b>ВЫДАН МУТ</b>\n\n"
-                f"👤 @{callback_data.get('violator_username', 'unknown')} (ID: {violator_id})\n"
-                f"📋 Правило: {callback_data.get('rule', 'Не указано')}\n"
-                f"⏱ Длительность: {duration_text}\n"
+                f"👤 @{violator_username} (ID: {violator_id})\n"
+                f"📋 Правило: {rule}\n"
+                f"⏱ Длительность: {duration_text_log}\n"
             )
             if duration != "forever":
                 log_text += f"🔚 До: {end_date}\n"
 
             log_text += (
-                f"\n🎖 Ранг: {moderator_role} (@{callback_data.get('moderator_username', 'unknown')})\n"
+                f"\n🎖 Ранг: {moderator_role} (@{moderator_username})\n"
             )
 
-            checker_username = callback_data.get('checker_username', '').lower()
-            checker_role_enum = USERS_ROLES.get(checker_username)
-            if checker_role_enum and checker_role_enum >= Role.СЗА:
-                log_text += f"✅ Одобрил: {checker_role} (@{callback_data.get('checker_username', 'unknown')})\n"
+            if approver_role and approver_role >= Role.СЗА:
+                log_text += f"✅ Одобрил: {approver_role_name} (@{approver_username})\n"
             else:
-                log_text += f"✅ Одобрил: {checker_role}\n"
+                log_text += f"✅ Одобрил: {approver_role_name}\n"
 
             log_text += f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
 
@@ -1963,32 +1954,30 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
             logger.info(f"Banned user {violator_id} for {duration}")
 
             # ЛОГ БАНА в канал
-            duration_text = "Навсегда" if duration == "forever" else duration
+            duration_text_log = "Навсегда" if duration == "forever" else duration
             end_date_ts = until_date if until_date else 0
             end_date = "—" if duration == "forever" else datetime.fromtimestamp(end_date_ts).strftime('%d.%m.%Y %H:%M')
 
-            moderator_role = get_user_role_name(callback_data.get('moderator_username', ''))
-            checker_role = get_user_role_name(callback_data.get('checker_username', ''))
+            moderator_role = get_user_role_name(moderator_username)
+            approver_role_name = get_user_role_name(approver_username)
 
             log_text = (
                 f"🚫 <b>ВЫДАН БАН</b>\n\n"
-                f"👤 @{callback_data.get('violator_username', 'unknown')} (ID: {violator_id})\n"
-                f"📋 Правило: {callback_data.get('rule', 'Не указано')}\n"
-                f"⏱ Длительность: {duration_text}\n"
+                f"👤 @{violator_username} (ID: {violator_id})\n"
+                f"📋 Правило: {rule}\n"
+                f"⏱ Длительность: {duration_text_log}\n"
             )
             if duration != "forever":
                 log_text += f"🔚 До: {end_date}\n"
 
             log_text += (
-                f"\n🎖 Ранг: {moderator_role} (@{callback_data.get('moderator_username', 'unknown')})\n"
+                f"\n🎖 Ранг: {moderator_role} (@{moderator_username})\n"
             )
 
-            checker_username = callback_data.get('checker_username', '').lower()
-            checker_role_enum = USERS_ROLES.get(checker_username)
-            if checker_role_enum and checker_role_enum >= Role.СЗА:
-                log_text += f"✅ Одобрил: {checker_role} (@{callback_data.get('checker_username', 'unknown')})\n"
+            if approver_role and approver_role >= Role.СЗА:
+                log_text += f"✅ Одобрил: {approver_role_name} (@{approver_username})\n"
             else:
-                log_text += f"✅ Одобрил: {checker_role}\n"
+                log_text += f"✅ Одобрил: {approver_role_name}\n"
 
             log_text += f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
 

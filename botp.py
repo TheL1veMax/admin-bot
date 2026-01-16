@@ -451,10 +451,6 @@ def remove_from_blacklist(user_id: int):
         logger.error(f"Remove blacklist error: {e}")
         return False
 
-
-# Словарь для пагинации
-pagination_data = {}
-
 async def delete_messages_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_ids: list, delay: int):
     """Удаляет сообщения из чата после задержки"""
     await asyncio.sleep(delay)
@@ -483,7 +479,6 @@ def get_user_role_name(username: str) -> str:
         Role.СЗА: "СЗА",
         Role.ЗАМ_ГЛАВНОГО: "Зам. Главного",
         Role.СТАРШИЙ_АДМИН: "Старший Админ",
-        Role.КУРАТОР: "Куратор",
         Role.СЗМ: "СЗМ",
         Role.АДМИН: "Админ",
         Role.МЛ_АДМИН: "Мл. Админ",
@@ -582,7 +577,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_display_name = get_display_name(user)
     register_user(user.id, user.username, user_display_name)
     user_role = get_user_role(user.username)
-    role_name = user_role.name if user_role is not None else "Не назначена"
+    role_name = user_role.name if user_role else "Не назначена"
 
     message_text = (
         "✅ Бот для проверки отчетов модерации запущен!\n\n"
@@ -594,10 +589,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⚠️ Команды:\n"
         "/stats - ваша статистика отчетов\n"
         "/stats @username - статистика пользователя (СЗМ+)\n"
-        "/profile - ваш профиль модератора\n"
-        "/profile @username - профиль модератора (Ст. Мод+)\n"
-        "/leaderboard - топ-15 модераторов и админов\n"
-        "/history @username - история наказаний (СЗМ+)\n"
         "/vg - выдать выговор (СЗМ+)\n"
         "/svg - снять выговор (СЗМ+)\n"
         "/bl - добавить в черный список (СЗМ+)\n"
@@ -679,7 +670,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_stats = get_user_stats(target_user_id)
     target_role = get_user_role(target_username) if isinstance(target_username, str) and not target_username.isdigit() else None
-    role_name = target_role.name if target_role is not None else "Не назначена"
+    role_name = target_role.name if target_role else "Не назначена"
 
     if target_user_id == user.id:
         stats_message = (
@@ -703,423 +694,6 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     stats_msg = await message.reply_text(stats_message, parse_mode='HTML')
     asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, stats_msg.message_id], DELETE_AFTER_SECONDS))
-
-
-async def delete_message_job(context, chat_id, message_id):
-    """Удаление сообщения"""
-    try:
-        await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
-    except:
-        pass
-
-async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Топ модераторов и админов"""
-    try:
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT 
-                        u.username,
-                        u.full_name,
-                        rs.accepted,
-                        rs.rejected,
-                        (rs.accepted + rs.rejected) as total
-                    FROM report_stats rs
-                    JOIN users u ON rs.user_id = u.user_id
-                    WHERE rs.accepted > 0
-                    ORDER BY rs.accepted DESC
-                    LIMIT 15
-                """)
-
-                results = cur.fetchall()
-
-        if not results:
-            await update.message.reply_text("📊 Пока нет данных")
-            return
-
-        leaderboard_text = "🏆 <b>ТОП-15 МОДЕРАТОРОВ И АДМИНОВ</b>\n"
-        leaderboard_text += "За всё время\n\n"
-
-        medals = ["🥇", "🥈", "🥉"]
-
-        for idx, (username, full_name, accepted, rejected, total) in enumerate(results, 1):
-            medal = medals[idx-1] if idx <= 3 else f"{idx}."
-
-            user_role_obj = get_user_role(username)
-            role_name = user_role_obj.name if user_role_obj is not None else "Модератор"
-
-            acceptance_rate = int((accepted / total * 100)) if total > 0 else 0
-
-            leaderboard_text += f"{medal} @{username}\n"
-            leaderboard_text += f"   🎖 {role_name}\n"
-            leaderboard_text += f"   ✅ Принято: {accepted} | ❌ Отклонено: {rejected}\n"
-            leaderboard_text += f"   📊 Процент: {acceptance_rate}%\n\n"
-
-        leaderboard_text += f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
-
-        sent_msg = await update.message.reply_text(leaderboard_text, parse_mode='HTML')
-
-        try:
-            await update.message.delete()
-        except:
-            pass
-
-        context.job_queue.run_once(
-            lambda c: delete_message_job(c, update.message.chat_id, sent_msg.message_id),
-            180
-        )
-
-    except Exception as e:
-        logger.error(f"Leaderboard error: {e}")
-        await update.message.reply_text("❌ Ошибка получения топа")
-
-def calculate_rating(accepted: int, rejected: int, months_in_team: int) -> float:
-    """Расчёт гибридного рейтинга модератора"""
-    total = accepted + rejected
-    if total == 0:
-        return 0.0
-
-    # Базовый рейтинг - процент принятых
-    acceptance_rate = accepted / total
-    base_rating = acceptance_rate * 5.0
-
-    # Бонус за активность (+0.2 за каждые 50 отчётов, макс +0.6)
-    activity_bonus = min(0.6, (total // 50) * 0.2)
-
-    # Бонус за стаж (+0.1 за месяц, макс +0.3)
-    experience_bonus = min(0.3, months_in_team * 0.1)
-
-    # Штраф за отклонённые (-0.1 за каждые 10%)
-    rejection_rate = rejected / total
-    rejection_penalty = (rejection_rate * 10) * 0.1
-
-    # Итоговый рейтинг
-    final_rating = base_rating + activity_bonus + experience_bonus - rejection_penalty
-
-    # Ограничиваем 0.0 - 5.0
-    return max(0.0, min(5.0, final_rating))
-
-async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Просмотр профиля модератора"""
-    user = update.message.from_user
-    user_role = get_user_role(user.username)
-
-    if user_role is None:
-        await update.message.reply_text("❌ Вы не зарегистрированы в системе")
-        return
-
-    # Определяем чей профиль смотрим
-    if context.args:
-        # Смотрим чужой профиль
-        if user_role < Role.СТАРШИЙ_МОДЕРАТОР:
-            await update.message.reply_text("❌ Нет доступа! (только Ст. Модератор+)")
-            return
-
-        target_username = context.args[0].lstrip('@')
-        requester_info = f"\n👁️ Запрошен: @{user.username} ({user_role.name})"
-    else:
-        # Смотрим свой профиль
-        target_username = user.username
-        requester_info = ""
-
-    try:
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                # Получаем данные пользователя
-                cur.execute("""
-                    SELECT u.user_id, u.username, u.full_name, u.created_at
-                    FROM users u
-                    WHERE LOWER(u.username) = LOWER(%s)
-                """, (target_username,))
-
-                user_data = cur.fetchone()
-
-                if not user_data:
-                    await update.message.reply_text("❌ Пользователь не найден")
-                    return
-
-                user_id, username, full_name, created_at = user_data
-
-                # Получаем статистику
-                cur.execute("""
-                    SELECT accepted, rejected
-                    FROM report_stats
-                    WHERE user_id = %s
-                """, (user_id,))
-
-                stats = cur.fetchone()
-
-                if stats:
-                    accepted, rejected = stats
-                else:
-                    accepted, rejected = 0, 0
-
-                total = accepted + rejected
-                success_rate = int((accepted / total * 100)) if total > 0 else 0
-
-                # Стаж в команде
-                now = datetime.now(MSK)
-                time_in_team = now - created_at.replace(tzinfo=MSK)
-                months_in_team = time_in_team.days // 30
-                days_remainder = time_in_team.days % 30
-
-                # Рейтинг
-                rating = calculate_rating(accepted, rejected, months_in_team)
-
-                # Место в топе
-                cur.execute("""
-                    SELECT COUNT(*) + 1
-                    FROM report_stats rs
-                    WHERE rs.accepted > %s
-                """, (accepted,))
-
-                position = cur.fetchone()[0]
-
-                # Всего модераторов
-                cur.execute("SELECT COUNT(*) FROM report_stats WHERE accepted > 0")
-                total_mods = cur.fetchone()[0]
-
-        # Получаем роль
-        target_role = get_user_role(username)
-        role_name = target_role.name if target_role is not None else "Модератор"
-
-        # Формируем сообщение
-        profile_text = f"👤 <b>ПРОФИЛЬ МОДЕРАТОРА</b>{requester_info}\n\n"
-        profile_text += f"@{username} | {full_name}\n"
-        profile_text += f"🎖 Роль: {role_name}\n"
-        profile_text += f"📅 В команде: {months_in_team} мес. {days_remainder} дн.\n\n"
-
-        profile_text += f"📊 <b>СТАТИСТИКА ОТЧЁТОВ:</b>\n"
-        profile_text += f"✅ Принято: {accepted}\n"
-        profile_text += f"❌ Отклонено: {rejected}\n"
-        profile_text += f"📈 Всего: {total}\n"
-        profile_text += f"💯 Процент успеха: {success_rate}%\n\n"
-
-        profile_text += f"🏆 <b>ДОСТИЖЕНИЯ:</b>\n"
-
-        # Медаль за место
-        if position == 1:
-            medal = "🥇"
-        elif position == 2:
-            medal = "🥈"
-        elif position == 3:
-            medal = "🥉"
-        else:
-            medal = "📊"
-
-        profile_text += f"{medal} Место в топе: #{position} из {total_mods}\n"
-        profile_text += f"⭐ Рейтинг: {rating:.1f} / 5.0\n"
-
-        # Особые статусы
-        if success_rate >= 95:
-            profile_text += f"🎯 Снайпер (95%+ принятых)\n"
-        if total >= 100:
-            profile_text += f"💪 Профессионал (100+ отчётов)\n"
-        if months_in_team >= 6:
-            profile_text += f"👑 Ветеран (6+ месяцев)\n"
-        if position <= 3:
-            profile_text += f"🏅 Топ-3 команды\n"
-
-        profile_text += f"\n📅 <b>АКТИВНОСТЬ:</b>\n"
-
-        # Визуальная полоска активности
-        total_bars = min(7, total // 10)  # 1 полоска = 10 отчётов
-        total_visual = "▓" * total_bars + "░" * (7 - total_bars)
-        profile_text += f"{total_visual} Всего отчётов: {total}\n"
-
-        profile_text += f"\n⏰ Обновлено: {now.strftime('%d.%m.%Y %H:%M')}"
-
-        await update.message.reply_text(profile_text, parse_mode='HTML')
-
-    except Exception as e:
-        logger.error(f"Profile error: {e}")
-        await update.message.reply_text("❌ Ошибка получения профиля")
-
-async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """История наказаний пользователя с пагинацией"""
-    user = update.message.from_user
-    user_role = get_user_role(user.username)
-
-    if user_role is None or user_role < Role.СЗМ:
-        await update.message.reply_text("❌ Нет доступа! (только СЗМ+)")
-        return
-
-    if not context.args:
-        await update.message.reply_text(
-            "📝 Использование:\n"
-            "/history @username - история наказаний\n"
-            "/history ID - история по ID"
-        )
-        return
-
-    target = context.args[0].lstrip('@')
-
-    try:
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                if target.isdigit():
-                    target_id = int(target)
-                    cur.execute("SELECT username, full_name FROM users WHERE user_id = %s", (target_id,))
-                else:
-                    cur.execute("SELECT user_id, full_name FROM users WHERE LOWER(username) = LOWER(%s)", (target,))
-
-                user_info = cur.fetchone()
-
-                if not user_info:
-                    await update.message.reply_text("❌ Пользователь не найден")
-                    return
-
-                if target.isdigit():
-                    target_username = user_info[0]
-                    target_name = user_info[1]
-                else:
-                    target_id = user_info[0]
-                    target_name = user_info[1]
-                    target_username = target
-
-                cur.execute("""
-                    SELECT 
-                        punishment_type,
-                        duration,
-                        rule,
-                        issued_by_username,
-                        approved_by_username,
-                        created_at
-                    FROM punishments
-                    WHERE user_id = %s
-                    ORDER BY created_at DESC
-                """, (target_id,))
-
-                punishments = cur.fetchall()
-
-        if not punishments:
-            msg = await update.message.reply_text(
-                f"📜 <b>ИСТОРИЯ НАКАЗАНИЙ</b>\n\n"
-                f"👤 @{target_username}\n\n"
-                f"✅ Нет наказаний",
-                parse_mode='HTML'
-            )
-            try:
-                await update.message.delete()
-            except:
-                pass
-            context.job_queue.run_once(
-                lambda c: delete_message_job(c, update.message.chat_id, msg.message_id),
-                300
-            )
-            return
-
-        pagination_key = f"{user.id}_{target_username}"
-        pagination_data[pagination_key] = {
-            'punishments': punishments,
-            'target_username': target_username,
-            'target_id': target_id,
-            'page': 0
-        }
-
-        await send_history_page(update.message.chat_id, pagination_key, context, is_reply=True, message=update.message)
-
-        try:
-            await update.message.delete()
-        except:
-            pass
-
-    except Exception as e:
-        logger.error(f"History error: {e}")
-        await update.message.reply_text("❌ Ошибка получения истории")
-
-async def send_history_page(chat_id, pagination_key, context, page=None, is_reply=False, message=None, callback_query=None):
-    """Отправка страницы истории наказаний"""
-    data = pagination_data.get(pagination_key)
-    if not data:
-        if callback_query:
-            await callback_query.answer("❌ Данные устарели, используйте /history заново")
-        return
-
-    if page is not None:
-        data['page'] = page
-
-    current_page = data['page']
-    punishments = data['punishments']
-    target_username = data['target_username']
-    target_id = data['target_id']
-
-    per_page = 5
-    total_pages = (len(punishments) + per_page - 1) // per_page
-    start_idx = current_page * per_page
-    end_idx = start_idx + per_page
-    page_punishments = punishments[start_idx:end_idx]
-
-    mutes = sum(1 for p in punishments if p[0] == 'mute')
-    warns = sum(1 for p in punishments if p[0] == 'warn')
-    bans = sum(1 for p in punishments if p[0] == 'ban')
-
-    history_text = f"📜 <b>ИСТОРИЯ НАКАЗАНИЙ</b>\n\n"
-    history_text += f"👤 @{target_username} (ID: {target_id})\n"
-    history_text += f"📊 Всего: {len(punishments)} | 🔇 Мутов: {mutes} | ⚠️ Варнов: {warns} | 🔒 Банов: {bans}\n"
-    history_text += f"📄 Страница {current_page + 1}/{total_pages}\n\n"
-
-    emoji_map = {'mute': '🔇', 'warn': '⚠️', 'ban': '🔒'}
-    name_map = {'mute': 'МУТ', 'warn': 'ВАРН', 'ban': 'БАН'}
-    dur_text = {
-        '1h': '1 час', '2h': '2 часа', '6h': '6 часов', '12h': '12 часов',
-        '1d': '1 день', '3d': '3 дня', '7d': '7 дней', '30d': '30 дней',
-        'forever': 'навсегда', 'once': ''
-    }
-
-    for idx, (pun_type, duration, rule, mod_user, appr_user, created) in enumerate(page_punishments, start_idx + 1):
-        duration_display = dur_text.get(duration, duration)
-        if duration != 'once' and duration_display:
-            duration_display = f" {duration_display}"
-        else:
-            duration_display = ""
-
-        history_text += f"{idx}. {emoji_map[pun_type]} <b>{name_map[pun_type]}{duration_display}</b>\n"
-        history_text += f"   📋 {rule}\n"
-        history_text += f"   👮 @{mod_user} | ✅ @{appr_user}\n"
-        history_text += f"   📅 {created.strftime('%d.%m.%Y %H:%M')}\n\n"
-
-    history_text += f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
-
-    buttons = []
-    if current_page > 0:
-        buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data=f"history_prev_{pagination_key}"))
-    if current_page < total_pages - 1:
-        buttons.append(InlineKeyboardButton("Вперёд ➡️", callback_data=f"history_next_{pagination_key}"))
-
-    keyboard = InlineKeyboardMarkup([buttons]) if buttons else None
-
-    if is_reply and message:
-        sent_msg = await message.reply_text(history_text, parse_mode='HTML', reply_markup=keyboard)
-        data['response_message_id'] = sent_msg.message_id
-        context.job_queue.run_once(
-            lambda c: delete_message_job(c, chat_id, sent_msg.message_id),
-            300
-        )
-    elif callback_query:
-        await callback_query.edit_message_text(history_text, parse_mode='HTML', reply_markup=keyboard)
-        await callback_query.answer()
-
-async def history_pagination_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка кнопок пагинации истории"""
-    query = update.callback_query
-    data = query.data
-
-    if data.startswith('history_prev_'):
-        pagination_key = data.replace('history_prev_', '')
-        if pagination_key in pagination_data:
-            new_page = max(0, pagination_data[pagination_key]['page'] - 1)
-            await send_history_page(query.message.chat_id, pagination_key, context, page=new_page, callback_query=query)
-
-    elif data.startswith('history_next_'):
-        pagination_key = data.replace('history_next_', '')
-        if pagination_key in pagination_data:
-            punishments = pagination_data[pagination_key]['punishments']
-            per_page = 5
-            total_pages = (len(punishments) + per_page - 1) // per_page
-            new_page = min(total_pages - 1, pagination_data[pagination_key]['page'] + 1)
-            await send_history_page(query.message.chat_id, pagination_key, context, page=new_page, callback_query=query)
-
 
 async def announcement_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /obv - отправка объявлений в топик"""
@@ -1889,8 +1463,7 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
     status_emoji = "✅" if action == 'accept' else "❌"
     status_text = "ПРИНЯТ" if action == 'accept' else "ОТКЛОНЕН"
 
-    # Для всех показываем имя и юзернейм
-    checker_display = f"{checker_display_name} (@{checker.username})"
+    checker_display = f"{checker_display_name} (@{checker.username})" if checker_role >= Role.СЗА else checker_role.name
 
     final_caption = (
         f"{status_emoji} <b>Отчет {category_title} {status_text}</b>\n\n"
@@ -1947,9 +1520,7 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
                     'approver_username': checker.username,
                     'approver_role': checker_role,
                     'rule': parsed['rule'],
-                    'recommendation': parsed['recommendation'] or '',
-                    'report_message_id': report.get('message_id'),
-                    'report_topic_id': report.get('topic_id')
+                    'recommendation': parsed['recommendation'] or ''
                 }
 
                 keyboard = [
@@ -2285,43 +1856,57 @@ async def send_punishment_dm(context: ContextTypes.DEFAULT_TYPE, violator_id: in
         logger.error(f"❌ Не удалось отправить ЛС пользователю {violator_id}: {e}")
         return False
 
-async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data: dict,
+async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data: dict, 
                             punishment_type: str, duration: str):
-    """Выполнение наказания"""
+
     violator_id = punishment_data['violator_id']
     violator_username = punishment_data['violator_username']
     violator_name = punishment_data['violator_name']
     moderator_username = punishment_data['moderator_username']
     approver_username = punishment_data['approver_username']
+    approver_role = punishment_data.get('approver_role')
     rule = punishment_data['rule']
-    report_message_id = punishment_data.get('report_message_id')
-    report_topic_id = punishment_data.get('report_topic_id')
 
-    add_punishment(violator_id, violator_username, violator_name, punishment_type, duration, rule,
-                   punishment_data['moderator_id'], moderator_username,
-                   punishment_data['approver_id'], approver_username)
+    add_punishment(
+        violator_id, violator_username, violator_name,
+        punishment_type, duration, rule,
+        punishment_data['moderator_id'], moderator_username,
+        punishment_data['approver_id'], approver_username
+    )
 
-    emoji = {'mute': '🔇', 'warn': '⚠️', 'ban': '🔒'}
-    name = {'mute': 'мут', 'warn': 'варн', 'ban': 'бан'}
-    dur_text = {'1h': '1 час', '2h': '2 часа', '6h': '6 часов', '12h': '12 часов',
-                '1d': '1 день', '3d': '3 дня', '7d': '7 дней', '30d': '30 дней',
-                'forever': 'навсегда', 'once': ''}
+    punishment_emoji = {
+        'mute': '🚫',
+        'warn': '⚠️',
+        'ban': '🔒'
+    }
 
-    duration_display = f" на {dur_text.get(duration, duration)}" if duration != 'once' else ""
+    punishment_name = {
+        'mute': 'мут',
+        'warn': 'варн',
+        'ban': 'бан'
+    }
 
-    moderator_role_obj = get_user_role(moderator_username)
-    moderator_display = moderator_role_obj.name if moderator_role_obj is not None else "Модератор"
+    duration_text = {
+        '1h': '1 час',
+        '2h': '2 часа',
+        '6h': '6 часов',
+        '12h': '12 часов',
+        '1d': '1 день',
+        '3d': '3 дня',
+        '7d': '7 дней',
+        '30d': '30 дней',
+        'forever': 'навсегда',
+        'once': ''
+    }
 
-    approver_role_obj = get_user_role(approver_username)
-    if approver_role_obj is not None and approver_role_obj == Role.СЗА:
-        approver_display = f"@{approver_username}"
-    else:
-        approver_display = approver_role_obj.name if approver_role_obj is not None else "Админ"
+    duration_display = f" {duration_text.get(duration, duration)}" if duration != 'once' else ""
+
+    approver_display = f"@{approver_username}" if approver_role >= Role.СЗА else approver_role.name
 
     notification = (
-        f"{emoji[punishment_type]} @{violator_username} получил {name[punishment_type]}{duration_display}\n"
+        f"{punishment_emoji[punishment_type]} @{violator_username} получил {punishment_name[punishment_type]}{duration_display}\n"
         f"📝 Правило: {rule}\n"
-        f"🎖 Ранг: {moderator_display}\n"
+        f"👮 Модератор: @{moderator_username}\n"
         f"✅ Одобрил: {approver_display}"
     )
 
@@ -2329,52 +1914,150 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
         if punishment_type == 'mute':
             until_date = calculate_until_date(duration)
             await context.bot.restrict_chat_member(
-                chat_id=PUBLIC_CHAT_ID, user_id=violator_id,
-                permissions=ChatPermissions(can_send_messages=False), until_date=until_date)
+                chat_id=f'@{PUBLIC_CHAT_USERNAME}',
+                user_id=violator_id,
+                permissions=ChatPermissions(can_send_messages=False),
+                until_date=until_date
+            )
+            logger.info(f"Muted user {violator_id} for {duration}")
+
+            # ЛОГ МУТА в канал
+            duration_text = "Навсегда" if duration == "forever" else duration
+            end_date_ts = until_date if until_date else 0
+            end_date = "—" if duration == "forever" else datetime.fromtimestamp(end_date_ts).strftime('%d.%m.%Y %H:%M')
+
+            moderator_role = get_user_role_name(moderator_username)
+            checker_role = get_user_role_name(approver_username)
+
+            log_text = (
+                f"🔇 <b>ВЫДАН МУТ</b>\n\n"
+                f"👤 @{violator_username} (ID: {violator_id})\n"
+                f"📋 Правило: {rule}\n"
+                f"⏱ Длительность: {duration_text}\n"
+            )
+            if duration != "forever":
+                log_text += f"🔚 До: {end_date}\n"
+
+            log_text += (
+                f"\n🎖 Ранг: {moderator_role} (@{callback_data.get('moderator_username', 'unknown')})\n"
+            )
+
+            checker_username = approver_username.lower()
+            approver_role_enum = USERS_ROLES.get(approver_username_lower)
+            if approver_role and approver_role >= Role.СЗА:
+                log_text += f"✅ Одобрил: {approver_role_name} (@{callback_data.get('checker_username', 'unknown')})\n"
+            else:
+                log_text += f"✅ Одобрил: {approver_role_name}\n"
+
+            log_text += f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
+
+            await send_log(context, log_text)
+
         elif punishment_type == 'ban':
             until_date = calculate_until_date(duration)
-            await context.bot.ban_chat_member(chat_id=PUBLIC_CHAT_ID, user_id=violator_id, until_date=until_date)
+            await context.bot.ban_chat_member(
+                chat_id=f'@{PUBLIC_CHAT_USERNAME}',
+                user_id=violator_id,
+                until_date=until_date
+            )
+            logger.info(f"Banned user {violator_id} for {duration}")
 
-        try:
-            await context.bot.send_message(chat_id=PUBLIC_CHAT_ID, text=notification, parse_mode='HTML')
-        except Exception as e:
-            logger.error(f"Notification error: {e}")
+            # ЛОГ БАНА в канал
+            duration_text = "Навсегда" if duration == "forever" else duration
+            end_date_ts = until_date if until_date else 0
+            end_date = "—" if duration == "forever" else datetime.fromtimestamp(end_date_ts).strftime('%d.%m.%Y %H:%M')
 
-        end_date = "—"
-        if punishment_type in ['mute', 'ban'] and duration != 'forever':
-            until_date_calc = calculate_until_date(duration)
-            if until_date_calc:
-                end_date = datetime.fromtimestamp(until_date_calc, tz=MSK).strftime('%d.%m.%Y %H:%M')
+            moderator_role = get_user_role_name(moderator_username)
+            checker_role = get_user_role_name(approver_username)
+
+            log_text = (
+                f"🚫 <b>ВЫДАН БАН</b>\n\n"
+                f"👤 @{violator_username} (ID: {violator_id})\n"
+                f"📋 Правило: {rule}\n"
+                f"⏱ Длительность: {duration_text}\n"
+            )
+            if duration != "forever":
+                log_text += f"🔚 До: {end_date}\n"
+
+            log_text += (
+                f"\n🎖 Ранг: {moderator_role} (@{callback_data.get('moderator_username', 'unknown')})\n"
+            )
+
+            checker_username = approver_username.lower()
+            approver_role_enum = USERS_ROLES.get(approver_username_lower)
+            if approver_role and approver_role >= Role.СЗА:
+                log_text += f"✅ Одобрил: {approver_role_name} (@{callback_data.get('checker_username', 'unknown')})\n"
+            else:
+                log_text += f"✅ Одобрил: {approver_role_name}\n"
+
+            log_text += f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
+
+            await send_log(context, log_text)
+
+        elif punishment_type == 'warn':
+            warn_count = get_active_warnings_count(violator_id)
+            if warn_count >= MAX_WARNINGS:
+                auto_mute_until = calculate_until_date('12h')
+                await context.bot.restrict_chat_member(
+                    chat_id=f'@{PUBLIC_CHAT_USERNAME}',
+                    user_id=violator_id,
+                    permissions=ChatPermissions(can_send_messages=False),
+                    until_date=auto_mute_until
+                )
+                notification += f"\n\n🚫 <b>АВТОМУТ 12 ЧАСОВ</b>\n(3 варна)"
+                logger.info(f"Auto-muted user {violator_id} for 12h (3 warns)")
+
+        # ЛОГ ВАРНА в канал
+        warn_count = get_active_warnings_count(violator_id)
+        moderator_role = get_user_role_name(moderator_username)
+        checker_role = get_user_role_name(approver_username)
 
         log_text = (
-            f"{emoji[punishment_type]} <b>ВЫДАН {name[punishment_type].upper()}</b>\n\n"
+            f"⚠️ <b>ВЫДАН ВАРН</b>\n\n"
             f"👤 @{violator_username} (ID: {violator_id})\n"
-            f"📋 Правило: {rule}\n"
-            f"⏱ Длительность: {dur_text.get(duration, duration)}\n"
+            f"📋 {rule}\n"
+            f"📊 Варнов: {warn_count}/3\n\n"
+            f"🎖 Ранг: {moderator_role} (@{callback_data.get('moderator_username', 'unknown')})\n"
         )
-        if duration != 'forever' and punishment_type in ['mute', 'ban']:
-            log_text += f"🔚 До: {end_date}\n"
 
-        log_text += f"\n🎖 Ранг: {moderator_display} (@{moderator_username})\n"
-
-        if approver_role_obj is not None and approver_role_obj == Role.СЗА:
-            log_text += f"✅ Одобрил: {approver_role_obj.name} (@{approver_username})\n"
+        checker_username = approver_username.lower()
+        approver_role_enum = USERS_ROLES.get(approver_username_lower)
+        if approver_role and approver_role >= Role.СЗА:
+            log_text += f"✅ Одобрил: {approver_role_name} (@{callback_data.get('checker_username', 'unknown')})\n"
         else:
-            log_text += f"✅ Одобрил: {approver_display}\n"
+            log_text += f"✅ Одобрил: {approver_role_name}\n"
 
         log_text += f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
+
         await send_log(context, log_text)
 
-        if report_message_id and report_topic_id:
-            try:
-                await context.bot.delete_message(chat_id=MAIN_CHAT_ID, message_id=report_message_id)
-                logger.info(f"✅ Deleted report {report_message_id}")
-            except Exception as e:
-                logger.error(f"❌ Delete error: {e}")
+        # Отправляем ЛС пользователю о наказании
+        await send_punishment_dm(
+            context,
+            violator_id,
+            violator_username,
+            punishment_type,
+            duration,
+            rule,
+            punishment_data["photo"],
+            is_manual=False
+        )
+
+        # Отправляем уведомление в публичный чат
+        msg = await context.bot.send_message(
+            chat_id=f"@{PUBLIC_CHAT_USERNAME}",
+            text=notification,
+            parse_mode='HTML'
+        )
+
+        # Удаление уведомления из публичного чата
+        asyncio.create_task(
+            delete_messages_after_delay(context, msg.chat.id, [msg.message_id], PUNISHMENT_DELETE_SECONDS)
+        )
+        logger.info(f"⏰ Уведомление будет удалено через {PUNISHMENT_DELETE_SECONDS}с")
 
     except Exception as e:
-        logger.error(f"Punishment error: {e}")
-        raise
+        logger.error(f"Failed to execute punishment: {e}")
 
 
 async def handle_appeal_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2485,10 +2168,6 @@ def main():
     application.add_handler(CommandHandler("ubl", unblacklist_command))
     application.add_handler(CommandHandler("sp", reset_accepted_command))
     application.add_handler(CommandHandler("so", reset_rejected_command))
-    application.add_handler(CommandHandler("leaderboard", leaderboard_command))
-    application.add_handler(CommandHandler("profile", profile_command))
-    application.add_handler(CommandHandler("history", history_command))
-    application.add_handler(CallbackQueryHandler(history_pagination_callback, pattern='^history_(prev|next)_'))
     application.add_handler(CommandHandler("obv", announcement_command))
     application.add_handler(CallbackQueryHandler(handle_button_callback))
 

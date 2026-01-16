@@ -47,9 +47,10 @@ stats_cooldowns = {}
 pending_punishments = {}
 
 class Role(IntEnum):
-    ГЛАВНЫЙ_АДМИН = 8
-    СЗА = 7
-    ЗАМ_ГЛАВНОГО = 6
+    ГЛАВНЫЙ_АДМИН = 9
+    СЗА = 8
+    ЗАМ_ГЛАВНОГО = 7
+    КУРАТОР = 6
     СТАРШИЙ_АДМИН = 5
     СЗМ = 4
     АДМИН = 3
@@ -65,7 +66,7 @@ USERS_ROLES = {
     'mskmboky': Role.СТАРШИЙ_АДМИН,
     'whysparky': Role.СЗМ,
     'maga8c': Role.АДМИН,
-    'qwelex_z': Role.КУРАТОРАДМИНИСТРАЦИИ,
+    'qwelex_z': Role.КУРАТОР,
     'anayka_lol': Role.МЛ_АДМИН,
     'matnozdra': Role.МЛ_АДМИН,
     'stmoder': Role.СТАРШИЙ_МОДЕРАТОР,
@@ -705,7 +706,7 @@ async def announcement_command(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     user_role = get_user_role(username)
-    allowed = [Role.СЗМ, Role.КУРАТОРАДМИНИСТРАЦИИ, Role.ЗАМЕСТИТЕЛЬГЛАВНОГОАДМИНА, Role.СЗА]
+    allowed = [Role.СЗМ, Role.КУРАТОР, Role.ЗАМ_ГЛАВНОГО, Role.СЗА]
 
     if not user_role or user_role not in allowed:
         await update.message.reply_text("❌ Нет прав\nДоступ: СЗМ, Куратор, Зам Гл.Админа, СЗА")

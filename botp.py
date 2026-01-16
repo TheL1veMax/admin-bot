@@ -669,24 +669,8 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target_username = user.username or str(user.id)
 
     user_stats = get_user_stats(target_user_id)
-
-    # DEBUG: Логируем что передается в get_user_role
-    logger.info(f"[STATS DEBUG] target_username = '{target_username}', type = {type(target_username)}")
-
     target_role = get_user_role(target_username) if isinstance(target_username, str) and not target_username.isdigit() else None
-
-    # DEBUG: Логируем результат
-    logger.info(f"[STATS DEBUG] get_user_role returned: {target_role}")
-    if target_role:
-        logger.info(f"[STATS DEBUG] Role name: {target_role.name}")
-    else:
-        logger.info(f"[STATS DEBUG] Role is None! Checking USERS_ROLES for '{target_username}'")
-        # Проверяем есть ли в словаре
-        clean = target_username.strip().lstrip('@').lower() if target_username else None
-        logger.info(f"[STATS DEBUG] Cleaned username: '{clean}'")
-        logger.info(f"[STATS DEBUG] In USERS_ROLES: {clean in USERS_ROLES if clean else False}")
-
-    role_name = target_role.name if target_role else "Не назначена"
+    role_name = target_role.name if target_role is not None else "Не назначена"
 
     if target_user_id == user.id:
         stats_message = (
@@ -1898,14 +1882,14 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
 
     # РАНГ МОДЕРАТОРА
     moderator_role_obj = get_user_role(moderator_username)
-    moderator_display = moderator_role_obj.name if moderator_role_obj else "Модератор"
+    moderator_display = moderator_role_obj.name if moderator_role_obj is not None else "Модератор"
 
     # ОДОБРИЛ (только СЗА показываем username)
     approver_role_obj = get_user_role(approver_username)
-    if approver_role_obj and approver_role_obj == Role.СЗА:
+    if approver_role_obj is not None and approver_role_obj == Role.СЗА:
         approver_display = f"@{approver_username}"
     else:
-        approver_display = approver_role_obj.name if approver_role_obj else "Админ"
+        approver_display = approver_role_obj.name if approver_role_obj is not None else "Админ"
 
     # Уведомление в чат
     notification = (
@@ -1934,7 +1918,7 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
         except Exception as e:
             logger.error(f"Notification error: {e}")
 
-        # Лог в канал
+        # Лог в канал (ПРАВИЛЬНЫЙ ФОРМАТ КАК НА СКРИНЕ)
         end_date = "—"
         if punishment_type in ['mute', 'ban'] and duration != 'forever':
             until_date_calc = calculate_until_date(duration)
@@ -1950,9 +1934,10 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
         if duration != 'forever' and punishment_type in ['mute', 'ban']:
             log_text += f"🔚 До: {end_date}\n"
 
-        log_text += f"\n🎖 Модератор: {moderator_display} (@{moderator_username})\n"
+        # ПРАВИЛЬНЫЙ ФОРМАТ: Ранг: (а не Модератор:)
+        log_text += f"\n🎖 Ранг: {moderator_display} (@{moderator_username})\n"
 
-        if approver_role_obj and approver_role_obj == Role.СЗА:
+        if approver_role_obj is not None and approver_role_obj == Role.СЗА:
             log_text += f"✅ Одобрил: {approver_role_obj.name} (@{approver_username})\n"
         else:
             log_text += f"✅ Одобрил: {approver_display}\n"

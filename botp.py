@@ -451,6 +451,10 @@ def remove_from_blacklist(user_id: int):
         logger.error(f"Remove blacklist error: {e}")
         return False
 
+
+# Словарь для хранения данных пагинации истории
+pagination_data = {}
+
 async def delete_messages_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_ids: list, delay: int):
     """Удаляет сообщения из чата после задержки"""
     await asyncio.sleep(delay)
@@ -699,9 +703,6 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, stats_msg.message_id], DELETE_AFTER_SECONDS))
 
 
-# Словарь для хранения callback данных пагинации
-pagination_data = {}
-
 async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Топ модераторов и админов по принятым отчётам"""
     try:
@@ -799,16 +800,17 @@ async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     target_name = user_info[1]
                     target_username = target
 
+                # ПРАВИЛЬНЫЕ названия колонок!
                 cur.execute("""
                     SELECT 
                         punishment_type,
                         duration,
                         rule,
-                        moderator_username,
-                        approver_username,
+                        issued_by_username,
+                        approved_by_username,
                         created_at
                     FROM punishments
-                    WHERE violator_id = %s
+                    WHERE user_id = %s
                     ORDER BY created_at DESC
                 """, (target_id,))
 
@@ -823,7 +825,6 @@ async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # Сохраняем данные для пагинации
         pagination_key = f"{user.id}_{target_username}"
         pagination_data[pagination_key] = {
             'punishments': punishments,
@@ -832,7 +833,6 @@ async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'page': 0
         }
 
-        # Отправляем первую страницу
         await send_history_page(update.message.chat_id, pagination_key, context, is_reply=True, message=update.message)
 
     except Exception as e:
@@ -841,8 +841,6 @@ async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def send_history_page(chat_id, pagination_key, context, page=None, is_reply=False, message=None, callback_query=None):
     """Отправка страницы истории наказаний"""
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-
     data = pagination_data.get(pagination_key)
     if not data:
         if callback_query:
@@ -857,14 +855,12 @@ async def send_history_page(chat_id, pagination_key, context, page=None, is_repl
     target_username = data['target_username']
     target_id = data['target_id']
 
-    # Параметры пагинации
     per_page = 5
     total_pages = (len(punishments) + per_page - 1) // per_page
     start_idx = current_page * per_page
     end_idx = start_idx + per_page
     page_punishments = punishments[start_idx:end_idx]
 
-    # Статистика
     mutes = sum(1 for p in punishments if p[0] == 'mute')
     warns = sum(1 for p in punishments if p[0] == 'warn')
     bans = sum(1 for p in punishments if p[0] == 'ban')
@@ -896,7 +892,6 @@ async def send_history_page(chat_id, pagination_key, context, page=None, is_repl
 
     history_text += f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
 
-    # Кнопки навигации
     buttons = []
     if current_page > 0:
         buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data=f"history_prev_{pagination_key}"))

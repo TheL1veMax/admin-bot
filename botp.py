@@ -669,7 +669,23 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target_username = user.username or str(user.id)
 
     user_stats = get_user_stats(target_user_id)
+
+    # DEBUG: Логируем что передается в get_user_role
+    logger.info(f"[STATS DEBUG] target_username = '{target_username}', type = {type(target_username)}")
+
     target_role = get_user_role(target_username) if isinstance(target_username, str) and not target_username.isdigit() else None
+
+    # DEBUG: Логируем результат
+    logger.info(f"[STATS DEBUG] get_user_role returned: {target_role}")
+    if target_role:
+        logger.info(f"[STATS DEBUG] Role name: {target_role.name}")
+    else:
+        logger.info(f"[STATS DEBUG] Role is None! Checking USERS_ROLES for '{target_username}'")
+        # Проверяем есть ли в словаре
+        clean = target_username.strip().lstrip('@').lower() if target_username else None
+        logger.info(f"[STATS DEBUG] Cleaned username: '{clean}'")
+        logger.info(f"[STATS DEBUG] In USERS_ROLES: {clean in USERS_ROLES if clean else False}")
+
     role_name = target_role.name if target_role else "Не назначена"
 
     if target_user_id == user.id:
@@ -1858,130 +1874,102 @@ async def send_punishment_dm(context: ContextTypes.DEFAULT_TYPE, violator_id: in
 
 async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data: dict,
                             punishment_type: str, duration: str):
-    """Выполнение наказания с правильным форматом уведомлений"""
+    """Выполнение наказания"""
     violator_id = punishment_data['violator_id']
     violator_username = punishment_data['violator_username']
     violator_name = punishment_data['violator_name']
     moderator_username = punishment_data['moderator_username']
     approver_username = punishment_data['approver_username']
-    approver_role = punishment_data.get('approver_role')
     rule = punishment_data['rule']
     report_message_id = punishment_data.get('report_message_id')
     report_topic_id = punishment_data.get('report_topic_id')
 
-    # Сохраняем в БД
-    add_punishment(
-        violator_id, violator_username, violator_name,
-        punishment_type, duration, rule,
-        punishment_data['moderator_id'], moderator_username,
-        punishment_data['approver_id'], approver_username
-    )
+    add_punishment(violator_id, violator_username, violator_name, punishment_type, duration, rule,
+                   punishment_data['moderator_id'], moderator_username,
+                   punishment_data['approver_id'], approver_username)
 
-    punishment_emoji = {'mute': '🔇', 'warn': '⚠️', 'ban': '🔒'}
-    punishment_name = {'mute': 'мут', 'warn': 'варн', 'ban': 'бан'}
-    duration_texts = {
-        '1h': '1 час', '2h': '2 часа', '6h': '6 часов', '12h': '12 часов',
-        '1d': '1 день', '3d': '3 дня', '7d': '7 дней', '30d': '30 дней',
-        'forever': 'навсегда', 'once': ''
-    }
+    emoji = {'mute': '🔇', 'warn': '⚠️', 'ban': '🔒'}
+    name = {'mute': 'мут', 'warn': 'варн', 'ban': 'бан'}
+    dur_text = {'1h': '1 час', '2h': '2 часа', '6h': '6 часов', '12h': '12 часов',
+                '1d': '1 день', '3d': '3 дня', '7d': '7 дней', '30d': '30 дней',
+                'forever': 'навсегда', 'once': ''}
 
-    duration_display = f" на {duration_texts.get(duration, duration)}" if duration != 'once' else ""
+    duration_display = f" на {dur_text.get(duration, duration)}" if duration != 'once' else ""
 
-    # Ранг модератора - ТОЛЬКО роль, БЕЗ username
+    # РАНГ МОДЕРАТОРА
     moderator_role_obj = get_user_role(moderator_username)
-    moderator_role_display = moderator_role_obj.name if moderator_role_obj else "Модератор"
+    moderator_display = moderator_role_obj.name if moderator_role_obj else "Модератор"
 
-    # Одобрил: ТОЛЬКО СЗА - показываем @username, остальные - только роль
+    # ОДОБРИЛ (только СЗА показываем username)
     approver_role_obj = get_user_role(approver_username)
     if approver_role_obj and approver_role_obj == Role.СЗА:
         approver_display = f"@{approver_username}"
     else:
         approver_display = approver_role_obj.name if approver_role_obj else "Админ"
 
-    # Уведомление в основной чат
+    # Уведомление в чат
     notification = (
-        f"{punishment_emoji[punishment_type]} @{violator_username} получил {punishment_name[punishment_type]}{duration_display}\n"
+        f"{emoji[punishment_type]} @{violator_username} получил {name[punishment_type]}{duration_display}\n"
         f"📝 Правило: {rule}\n"
-        f"🎖 Ранг: {moderator_role_display}\n"
+        f"🎖 Ранг: {moderator_display}\n"
         f"✅ Одобрил: {approver_display}"
     )
 
     try:
-        # Выполняем само наказание
+        # Выполняем наказание
         if punishment_type == 'mute':
             until_date = calculate_until_date(duration)
             await context.bot.restrict_chat_member(
-                chat_id=PUBLIC_CHAT_ID,
-                user_id=violator_id,
-                permissions=ChatPermissions(can_send_messages=False),
-                until_date=until_date
-            )
-            logger.info(f"Muted user {violator_id} for {duration}")
-
+                chat_id=PUBLIC_CHAT_ID, user_id=violator_id,
+                permissions=ChatPermissions(can_send_messages=False), until_date=until_date)
+            logger.info(f"Muted {violator_id} for {duration}")
         elif punishment_type == 'ban':
             until_date = calculate_until_date(duration)
-            await context.bot.ban_chat_member(
-                chat_id=PUBLIC_CHAT_ID,
-                user_id=violator_id,
-                until_date=until_date
-            )
-            logger.info(f"Banned user {violator_id} for {duration}")
+            await context.bot.ban_chat_member(chat_id=PUBLIC_CHAT_ID, user_id=violator_id, until_date=until_date)
+            logger.info(f"Banned {violator_id} for {duration}")
 
-        # Отправляем уведомление в основной чат
+        # Уведомление в основной чат
         try:
-            await context.bot.send_message(
-                chat_id=PUBLIC_CHAT_ID,
-                text=notification,
-                parse_mode='HTML'
-            )
-            logger.info("Notification sent to main chat")
+            await context.bot.send_message(chat_id=PUBLIC_CHAT_ID, text=notification, parse_mode='HTML')
         except Exception as e:
-            logger.error(f"Failed to send notification to main chat: {e}")
+            logger.error(f"Notification error: {e}")
 
-        # Формируем лог для канала (с полной информацией)
-        duration_text = duration_texts.get(duration, duration)
+        # Лог в канал
         end_date = "—"
         if punishment_type in ['mute', 'ban'] and duration != 'forever':
             until_date_calc = calculate_until_date(duration)
             if until_date_calc:
                 end_date = datetime.fromtimestamp(until_date_calc, tz=MSK).strftime('%d.%m.%Y %H:%M')
 
-        punishment_upper = punishment_name[punishment_type].upper()
         log_text = (
-            f"{punishment_emoji[punishment_type]} <b>ВЫДАН {punishment_upper}</b>\n\n"
+            f"{emoji[punishment_type]} <b>ВЫДАН {name[punishment_type].upper()}</b>\n\n"
             f"👤 @{violator_username} (ID: {violator_id})\n"
             f"📋 Правило: {rule}\n"
-            f"⏱ Длительность: {duration_text}\n"
+            f"⏱ Длительность: {dur_text.get(duration, duration)}\n"
         )
-
         if duration != 'forever' and punishment_type in ['mute', 'ban']:
             log_text += f"🔚 До: {end_date}\n"
 
-        log_text += f"\n🎖 Модератор: {moderator_role_display} (@{moderator_username})\n"
+        log_text += f"\n🎖 Модератор: {moderator_display} (@{moderator_username})\n"
 
-        # В логах тоже ТОЛЬКО СЗА показываем username
         if approver_role_obj and approver_role_obj == Role.СЗА:
             log_text += f"✅ Одобрил: {approver_role_obj.name} (@{approver_username})\n"
         else:
             log_text += f"✅ Одобрил: {approver_display}\n"
 
         log_text += f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
-
         await send_log(context, log_text)
 
-        # Удаляем сообщение отчета из топика
+        # Удаление отчета
         if report_message_id and report_topic_id:
             try:
-                await context.bot.delete_message(
-                    chat_id=MAIN_CHAT_ID,
-                    message_id=report_message_id
-                )
-                logger.info(f"Deleted report message {report_message_id} from topic {report_topic_id}")
+                await context.bot.delete_message(chat_id=MAIN_CHAT_ID, message_id=report_message_id)
+                logger.info(f"Deleted report {report_message_id}")
             except Exception as e:
-                logger.error(f"Failed to delete report message: {e}")
+                logger.error(f"Delete error: {e}")
 
     except Exception as e:
-        logger.error(f"Punishment execution error: {e}")
+        logger.error(f"Punishment error: {e}")
         raise
 
 

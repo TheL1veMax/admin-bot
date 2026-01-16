@@ -79,8 +79,8 @@ USERS_ROLES = {
     'murmes': Role.МОДЕРАТОР,
     'sportaisam': Role.МОДЕРАТОР,
     'rusich_group35': Role.МОДЕРАТОР,
-    'modtgi': Role.МОДЕРАТОР
-    's1mka2': Role.МОДЕРАТОР
+    'modtgi': Role.МОДЕРАТОР,
+    's1mka2': Role.МОДЕРАТОР,
 }
 
 reports_data = {}
@@ -2182,6 +2182,7 @@ if __name__ == '__main__':
             )
         )
         logger.info(f"⏰ Принятый отчёт будет удалён через 2 мин")
+
 
 
 

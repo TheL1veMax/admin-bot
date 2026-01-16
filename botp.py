@@ -479,6 +479,7 @@ def get_user_role_name(username: str) -> str:
         Role.СЗА: "СЗА",
         Role.ЗАМ_ГЛАВНОГО: "Зам. Главного",
         Role.СТАРШИЙ_АДМИН: "Старший Админ",
+        Role.КУРАТОР: "Куратор",
         Role.СЗМ: "СЗМ",
         Role.АДМИН: "Админ",
         Role.МЛ_АДМИН: "Мл. Админ",
@@ -589,6 +590,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⚠️ Команды:\n"
         "/stats - ваша статистика отчетов\n"
         "/stats @username - статистика пользователя (СЗМ+)\n"
+        "/leaderboard - топ-15 модераторов и админов\n"
+        "/history @username - история наказаний (СЗМ+)\n"
         "/vg - выдать выговор (СЗМ+)\n"
         "/svg - снять выговор (СЗМ+)\n"
         "/bl - добавить в черный список (СЗМ+)\n"
@@ -694,6 +697,240 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     stats_msg = await message.reply_text(stats_message, parse_mode='HTML')
     asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, stats_msg.message_id], DELETE_AFTER_SECONDS))
+
+
+# Словарь для хранения callback данных пагинации
+pagination_data = {}
+
+async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Топ модераторов и админов по принятым отчётам"""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT 
+                        u.username,
+                        u.full_name,
+                        SUM(CASE WHEN rs.status = 'accepted' THEN 1 ELSE 0 END) as accepted,
+                        SUM(CASE WHEN rs.status = 'rejected' THEN 1 ELSE 0 END) as rejected,
+                        COUNT(*) as total
+                    FROM report_stats rs
+                    JOIN users u ON rs.user_id = u.user_id
+                    WHERE rs.created_at >= NOW() - INTERVAL '30 days'
+                    GROUP BY u.username, u.full_name
+                    HAVING SUM(CASE WHEN rs.status = 'accepted' THEN 1 ELSE 0 END) > 0
+                    ORDER BY accepted DESC
+                    LIMIT 15
+                """)
+
+                results = cur.fetchall()
+
+        if not results:
+            await update.message.reply_text("📊 Пока нет данных за последние 30 дней")
+            return
+
+        leaderboard_text = "🏆 <b>ТОП-15 МОДЕРАТОРОВ И АДМИНОВ</b>\n"
+        leaderboard_text += "За последние 30 дней\n\n"
+
+        medals = ["🥇", "🥈", "🥉"]
+
+        for idx, (username, full_name, accepted, rejected, total) in enumerate(results, 1):
+            medal = medals[idx-1] if idx <= 3 else f"{idx}."
+
+            user_role_obj = get_user_role(username)
+            role_name = user_role_obj.name if user_role_obj is not None else "Модератор"
+
+            acceptance_rate = int((accepted / total * 100)) if total > 0 else 0
+
+            leaderboard_text += f"{medal} @{username}\n"
+            leaderboard_text += f"   🎖 {role_name}\n"
+            leaderboard_text += f"   ✅ Принято: {accepted} | ❌ Отклонено: {rejected}\n"
+            leaderboard_text += f"   📊 Процент: {acceptance_rate}%\n\n"
+
+        leaderboard_text += f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
+
+        await update.message.reply_text(leaderboard_text, parse_mode='HTML')
+
+    except Exception as e:
+        logger.error(f"Leaderboard error: {e}")
+        await update.message.reply_text("❌ Ошибка получения топа")
+
+
+
+async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """История наказаний пользователя с пагинацией"""
+    user = update.message.from_user
+    user_role = get_user_role(user.username)
+
+    if user_role is None or user_role < Role.СЗМ:
+        await update.message.reply_text("❌ Нет доступа! (только СЗМ+)")
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "📝 Использование:\n"
+            "/history @username - история наказаний\n"
+            "/history ID - история по ID"
+        )
+        return
+
+    target = context.args[0].lstrip('@')
+
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                if target.isdigit():
+                    target_id = int(target)
+                    cur.execute("SELECT username, full_name FROM users WHERE user_id = %s", (target_id,))
+                else:
+                    cur.execute("SELECT user_id, full_name FROM users WHERE LOWER(username) = LOWER(%s)", (target,))
+
+                user_info = cur.fetchone()
+
+                if not user_info:
+                    await update.message.reply_text("❌ Пользователь не найден")
+                    return
+
+                if target.isdigit():
+                    target_username = user_info[0]
+                    target_name = user_info[1]
+                else:
+                    target_id = user_info[0]
+                    target_name = user_info[1]
+                    target_username = target
+
+                cur.execute("""
+                    SELECT 
+                        punishment_type,
+                        duration,
+                        rule,
+                        moderator_username,
+                        approver_username,
+                        created_at
+                    FROM punishments
+                    WHERE violator_id = %s
+                    ORDER BY created_at DESC
+                """, (target_id,))
+
+                punishments = cur.fetchall()
+
+        if not punishments:
+            await update.message.reply_text(
+                f"📜 <b>ИСТОРИЯ НАКАЗАНИЙ</b>\n\n"
+                f"👤 @{target_username}\n\n"
+                f"✅ Нет наказаний",
+                parse_mode='HTML'
+            )
+            return
+
+        # Сохраняем данные для пагинации
+        pagination_key = f"{user.id}_{target_username}"
+        pagination_data[pagination_key] = {
+            'punishments': punishments,
+            'target_username': target_username,
+            'target_id': target_id,
+            'page': 0
+        }
+
+        # Отправляем первую страницу
+        await send_history_page(update.message.chat_id, pagination_key, context, is_reply=True, message=update.message)
+
+    except Exception as e:
+        logger.error(f"History error: {e}")
+        await update.message.reply_text("❌ Ошибка получения истории")
+
+async def send_history_page(chat_id, pagination_key, context, page=None, is_reply=False, message=None, callback_query=None):
+    """Отправка страницы истории наказаний"""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    data = pagination_data.get(pagination_key)
+    if not data:
+        if callback_query:
+            await callback_query.answer("❌ Данные устарели, используйте /history заново")
+        return
+
+    if page is not None:
+        data['page'] = page
+
+    current_page = data['page']
+    punishments = data['punishments']
+    target_username = data['target_username']
+    target_id = data['target_id']
+
+    # Параметры пагинации
+    per_page = 5
+    total_pages = (len(punishments) + per_page - 1) // per_page
+    start_idx = current_page * per_page
+    end_idx = start_idx + per_page
+    page_punishments = punishments[start_idx:end_idx]
+
+    # Статистика
+    mutes = sum(1 for p in punishments if p[0] == 'mute')
+    warns = sum(1 for p in punishments if p[0] == 'warn')
+    bans = sum(1 for p in punishments if p[0] == 'ban')
+
+    history_text = f"📜 <b>ИСТОРИЯ НАКАЗАНИЙ</b>\n\n"
+    history_text += f"👤 @{target_username} (ID: {target_id})\n"
+    history_text += f"📊 Всего: {len(punishments)} | 🔇 Мутов: {mutes} | ⚠️ Варнов: {warns} | 🔒 Банов: {bans}\n"
+    history_text += f"📄 Страница {current_page + 1}/{total_pages}\n\n"
+
+    emoji_map = {'mute': '🔇', 'warn': '⚠️', 'ban': '🔒'}
+    name_map = {'mute': 'МУТ', 'warn': 'ВАРН', 'ban': 'БАН'}
+    dur_text = {
+        '1h': '1 час', '2h': '2 часа', '6h': '6 часов', '12h': '12 часов',
+        '1d': '1 день', '3d': '3 дня', '7d': '7 дней', '30d': '30 дней',
+        'forever': 'навсегда', 'once': ''
+    }
+
+    for idx, (pun_type, duration, rule, mod_user, appr_user, created) in enumerate(page_punishments, start_idx + 1):
+        duration_display = dur_text.get(duration, duration)
+        if duration != 'once' and duration_display:
+            duration_display = f" {duration_display}"
+        else:
+            duration_display = ""
+
+        history_text += f"{idx}. {emoji_map[pun_type]} <b>{name_map[pun_type]}{duration_display}</b>\n"
+        history_text += f"   📋 {rule}\n"
+        history_text += f"   👮 @{mod_user} | ✅ @{appr_user}\n"
+        history_text += f"   📅 {created.strftime('%d.%m.%Y %H:%M')}\n\n"
+
+    history_text += f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
+
+    # Кнопки навигации
+    buttons = []
+    if current_page > 0:
+        buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data=f"history_prev_{pagination_key}"))
+    if current_page < total_pages - 1:
+        buttons.append(InlineKeyboardButton("Вперёд ➡️", callback_data=f"history_next_{pagination_key}"))
+
+    keyboard = InlineKeyboardMarkup([buttons]) if buttons else None
+
+    if is_reply and message:
+        await message.reply_text(history_text, parse_mode='HTML', reply_markup=keyboard)
+    elif callback_query:
+        await callback_query.edit_message_text(history_text, parse_mode='HTML', reply_markup=keyboard)
+        await callback_query.answer()
+
+async def history_pagination_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка кнопок пагинации истории"""
+    query = update.callback_query
+    data = query.data
+
+    if data.startswith('history_prev_'):
+        pagination_key = data.replace('history_prev_', '')
+        if pagination_key in pagination_data:
+            new_page = max(0, pagination_data[pagination_key]['page'] - 1)
+            await send_history_page(query.message.chat_id, pagination_key, context, page=new_page, callback_query=query)
+
+    elif data.startswith('history_next_'):
+        pagination_key = data.replace('history_next_', '')
+        if pagination_key in pagination_data:
+            punishments = pagination_data[pagination_key]['punishments']
+            per_page = 5
+            total_pages = (len(punishments) + per_page - 1) // per_page
+            new_page = min(total_pages - 1, pagination_data[pagination_key]['page'] + 1)
+            await send_history_page(query.message.chat_id, pagination_key, context, page=new_page, callback_query=query)
+
 
 async def announcement_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /obv - отправка объявлений в топик"""
@@ -1938,7 +2175,6 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
         log_text += f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
         await send_log(context, log_text)
 
-        # Удаление отчёта
         if report_message_id and report_topic_id:
             try:
                 await context.bot.delete_message(chat_id=MAIN_CHAT_ID, message_id=report_message_id)
@@ -2059,6 +2295,9 @@ def main():
     application.add_handler(CommandHandler("ubl", unblacklist_command))
     application.add_handler(CommandHandler("sp", reset_accepted_command))
     application.add_handler(CommandHandler("so", reset_rejected_command))
+    application.add_handler(CommandHandler("leaderboard", leaderboard_command))
+    application.add_handler(CommandHandler("history", history_command))
+    application.add_handler(CallbackQueryHandler(history_pagination_callback, pattern='^history_(prev|next)_'))
     application.add_handler(CommandHandler("obv", announcement_command))
     application.add_handler(CallbackQueryHandler(handle_button_callback))
 

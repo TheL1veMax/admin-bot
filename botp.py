@@ -1998,6 +1998,7 @@ def main():
     application.add_handler(CommandHandler("ubl", unblacklist_command))
     application.add_handler(CommandHandler("sp", reset_accepted_command))
     application.add_handler(CommandHandler("so", reset_rejected_command))
+    application.add_handler(CommandHandler("obv", announcement_command))
     application.add_handler(CallbackQueryHandler(handle_button_callback))
 
     logger.info("✅ Bot running with automatic punishments!")
@@ -2019,5 +2020,4 @@ if __name__ == '__main__':
         )
         logger.info(f"⏰ Принятый отчёт будет удалён через 2 мин")
 
-    app.add_handler(CommandHandler('obv', announcement_command))
 

@@ -1939,15 +1939,15 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
                 log_text += f"🔚 До: {end_date}\n"
 
             log_text += (
-                f"\n🎖 Ранг: {moderator_role} (@{callback_data.get('moderator_username', 'unknown')})\n"
+                f"\n🎖 Ранг: {moderator_role} (@{moderator_username})\n"
             )
 
             checker_username = approver_username.lower()
-            checker_role_enum = USERS_ROLES.get(checker_username)
-            if checker_role_enum and checker_role_enum >= Role.СЗА:
-                log_text += f"✅ Одобрил: {checker_role} (@{callback_data.get('checker_username', 'unknown')})\n"
+            approver_role_enum = USERS_ROLES.get(approver_username_lower)
+            if approver_role and approver_role >= Role.СЗА:
+                log_text += f"✅ Одобрил: {approver_role_name} (@{approver_username})\n"
             else:
-                log_text += f"✅ Одобрил: {checker_role}\n"
+                log_text += f"✅ Одобрил: {approver_role_name}\n"
 
             log_text += f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
 
@@ -1980,15 +1980,15 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
                 log_text += f"🔚 До: {end_date}\n"
 
             log_text += (
-                f"\n🎖 Ранг: {moderator_role} (@{callback_data.get('moderator_username', 'unknown')})\n"
+                f"\n🎖 Ранг: {moderator_role} (@{moderator_username})\n"
             )
 
             checker_username = approver_username.lower()
-            checker_role_enum = USERS_ROLES.get(checker_username)
-            if checker_role_enum and checker_role_enum >= Role.СЗА:
-                log_text += f"✅ Одобрил: {checker_role} (@{callback_data.get('checker_username', 'unknown')})\n"
+            approver_role_enum = USERS_ROLES.get(approver_username_lower)
+            if approver_role and approver_role >= Role.СЗА:
+                log_text += f"✅ Одобрил: {approver_role_name} (@{approver_username})\n"
             else:
-                log_text += f"✅ Одобрил: {checker_role}\n"
+                log_text += f"✅ Одобрил: {approver_role_name}\n"
 
             log_text += f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
 
@@ -2017,15 +2017,15 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
             f"👤 @{violator_username} (ID: {violator_id})\n"
             f"📋 {rule}\n"
             f"📊 Варнов: {warn_count}/3\n\n"
-            f"🎖 Ранг: {moderator_role} (@{callback_data.get('moderator_username', 'unknown')})\n"
+            f"🎖 Ранг: {moderator_role} (@{moderator_username})\n"
         )
 
         checker_username = approver_username.lower()
-        checker_role_enum = USERS_ROLES.get(checker_username)
-        if checker_role_enum and checker_role_enum >= Role.СЗА:
-            log_text += f"✅ Одобрил: {checker_role} (@{callback_data.get('checker_username', 'unknown')})\n"
+        approver_role_enum = USERS_ROLES.get(approver_username_lower)
+        if approver_role and approver_role >= Role.СЗА:
+            log_text += f"✅ Одобрил: {approver_role_name} (@{approver_username})\n"
         else:
-            log_text += f"✅ Одобрил: {checker_role}\n"
+            log_text += f"✅ Одобрил: {approver_role_name}\n"
 
         log_text += f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
 

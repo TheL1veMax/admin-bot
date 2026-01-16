@@ -70,16 +70,17 @@ USERS_ROLES = {
     'anayka_lol': Role.МЛ_АДМИН,
     'matnozdra': Role.МЛ_АДМИН,
     'stmoder': Role.СТАРШИЙ_МОДЕРАТОР,
-    'st_moder2': Role.СТАРШИЙ_МОДЕРАТОР,
-    'breakbrosmiling': Role.МОДЕРАТОР,
-    'bosspogranki': Role.МОДЕРАТОР,
-    'spearskill': Role.МОДЕРАТОР,
-    'neverexikid': Role.МОДЕРАТОР,
-    'finn_wolfhard1223': Role.МОДЕРАТОР,
-    'miwa123009': Role.МОДЕРАТОР,
+    'miwa123009': Role.СТАРШИЙ_МОДЕРАТОР,
+    'breakbrosmiling': Role.СТАРШИЙ_МОДЕРАТОР,
+    'unbesiegbar_s': Role.МОДЕРАТОР,
+    'grechka_aw': Role.МОДЕРАТОР,
+    'spl1ntexxx': Role.МОДЕРАТОР,
+    'svezhiy_vozdyx': Role.МОДЕРАТОР,
+    'murmes': Role.МОДЕРАТОР,
     'sportaisam': Role.МОДЕРАТОР,
     'rusich_group35': Role.МОДЕРАТОР,
     'modtgi': Role.МОДЕРАТОР
+    's1mka2': Role.МОДЕРАТОР
 }
 
 reports_data = {}
@@ -2181,6 +2182,7 @@ if __name__ == '__main__':
             )
         )
         logger.info(f"⏰ Принятый отчёт будет удалён через 2 мин")
+
 
 
 

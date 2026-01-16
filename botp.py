@@ -1520,7 +1520,9 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
                     'approver_username': checker.username,
                     'approver_role': checker_role,
                     'rule': parsed['rule'],
-                    'recommendation': parsed['recommendation'] or ''
+                    'recommendation': parsed['recommendation'] or '',
+                    'report_message_id': report.get('message_id'),
+                    'report_topic_id': report.get('topic_id')
                 }
 
                 keyboard = [
@@ -1880,18 +1882,15 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
 
     duration_display = f" на {dur_text.get(duration, duration)}" if duration != 'once' else ""
 
-    # РАНГ МОДЕРАТОРА
     moderator_role_obj = get_user_role(moderator_username)
     moderator_display = moderator_role_obj.name if moderator_role_obj is not None else "Модератор"
 
-    # ОДОБРИЛ (только СЗА показываем username)
     approver_role_obj = get_user_role(approver_username)
     if approver_role_obj is not None and approver_role_obj == Role.СЗА:
         approver_display = f"@{approver_username}"
     else:
         approver_display = approver_role_obj.name if approver_role_obj is not None else "Админ"
 
-    # Уведомление в чат
     notification = (
         f"{emoji[punishment_type]} @{violator_username} получил {name[punishment_type]}{duration_display}\n"
         f"📝 Правило: {rule}\n"
@@ -1900,25 +1899,20 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
     )
 
     try:
-        # Выполняем наказание
         if punishment_type == 'mute':
             until_date = calculate_until_date(duration)
             await context.bot.restrict_chat_member(
                 chat_id=PUBLIC_CHAT_ID, user_id=violator_id,
                 permissions=ChatPermissions(can_send_messages=False), until_date=until_date)
-            logger.info(f"Muted {violator_id} for {duration}")
         elif punishment_type == 'ban':
             until_date = calculate_until_date(duration)
             await context.bot.ban_chat_member(chat_id=PUBLIC_CHAT_ID, user_id=violator_id, until_date=until_date)
-            logger.info(f"Banned {violator_id} for {duration}")
 
-        # Уведомление в основной чат
         try:
             await context.bot.send_message(chat_id=PUBLIC_CHAT_ID, text=notification, parse_mode='HTML')
         except Exception as e:
             logger.error(f"Notification error: {e}")
 
-        # Лог в канал (ПРАВИЛЬНЫЙ ФОРМАТ КАК НА СКРИНЕ)
         end_date = "—"
         if punishment_type in ['mute', 'ban'] and duration != 'forever':
             until_date_calc = calculate_until_date(duration)
@@ -1934,7 +1928,6 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
         if duration != 'forever' and punishment_type in ['mute', 'ban']:
             log_text += f"🔚 До: {end_date}\n"
 
-        # ПРАВИЛЬНЫЙ ФОРМАТ: Ранг: (а не Модератор:)
         log_text += f"\n🎖 Ранг: {moderator_display} (@{moderator_username})\n"
 
         if approver_role_obj is not None and approver_role_obj == Role.СЗА:
@@ -1945,13 +1938,13 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
         log_text += f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
         await send_log(context, log_text)
 
-        # Удаление отчета
+        # УДАЛЕНИЕ ОТЧЁТА
         if report_message_id and report_topic_id:
             try:
                 await context.bot.delete_message(chat_id=MAIN_CHAT_ID, message_id=report_message_id)
-                logger.info(f"Deleted report {report_message_id}")
+                logger.info(f"✅ Deleted report message {report_message_id} from topic {report_topic_id}")
             except Exception as e:
-                logger.error(f"Delete error: {e}")
+                logger.error(f"❌ Delete error: {e}")
 
     except Exception as e:
         logger.error(f"Punishment error: {e}")

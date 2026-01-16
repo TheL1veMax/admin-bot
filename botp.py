@@ -1380,50 +1380,57 @@ async def handle_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error: {e}")
 
 async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка нажатий на кнопки"""
     query = update.callback_query
     await query.answer()
 
     data = query.data
 
-        if data.startswith('appeal'):
-            await handle_appeal_callback(update, context)
-            return
+    # Проверка на обжалование ПЕРВОЙ - с правильным отступом!
+    if data.startswith('appeal'):
+        await handle_appeal_callback(update, context)
+        return
 
-    if data.startswith('accept_') or data.startswith('reject_'):
+    if data.startswith('accept') or data.startswith('reject'):
         await handle_report_decision(update, context)
-    elif data.startswith('punish_'):
+    elif data.startswith('punish'):
         await handle_punishment_type(update, context)
-    elif data.startswith('duration_'):
+    elif data.startswith('duration'):
         await handle_punishment_duration(update, context)
-    elif data.startswith('confirm_duplicate_'):
+    elif data.startswith('confirm_duplicate'):
         await handle_duplicate_confirmation(update, context)
-    elif data.startswith('back_punishment_'):
+    elif data.startswith('back_punishment'):
         report_id = data.split('_')[-1]
         punishment_key = f"punishment_{report_id}"
+
         if punishment_key not in pending_punishments:
-            await query.answer("❌ Данные не найдены!", show_alert=True)
+            await query.answer("⚠️ Данные устарели!", show_alert=True)
             return
+
         punishment_data = pending_punishments[punishment_key]
 
         keyboard = [
             [InlineKeyboardButton("🔇 Мут", callback_data=f"punish_mute_{report_id}")],
-            [InlineKeyboardButton("⚠️ Варн", callback_data=f"punish_warn_{report_id}")],
+            [InlineKeyboardButton("⚠️ Предупреждение", callback_data=f"punish_warn_{report_id}")],
             [InlineKeyboardButton("🚫 Бан", callback_data=f"punish_ban_{report_id}")],
-            [InlineKeyboardButton("✋ Выдать вручную", callback_data=f"punish_manual_{report_id}")]
+            [InlineKeyboardButton("📝 Ручное наказание", callback_data=f"punish_manual_{report_id}")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        punishment_text = (
-            f"⚖️ Выберите наказание\n\n"
-            f"👤 Нарушитель: @{punishment_data['violator_username']}\n"
-            f"📋 Правило: {punishment_data['rule']}\n"
-            f"💡 Рекомендация: {punishment_data.get('recommendation') or 'не указана'}"
-        )
+
+        punishment_text = f"⚖️ Выберите наказание\n\n"
+        punishment_text += f"👤 Нарушитель: {punishment_data['violator_username']}\n"
+        punishment_text += f"📋 Правило: {punishment_data['rule']}\n"
+        punishment_text += f"💡 Рекомендация: {punishment_data.get('recommendation') or 'Не указана'}"
+
         await query.edit_message_text(punishment_text, parse_mode='HTML', reply_markup=reply_markup)
-    elif data.startswith('cancel_punishment_'):
+
+    elif data.startswith('cancel_punishment'):
         punishment_key = f"punishment_{data.split('_')[-1]}"
         if punishment_key in pending_punishments:
             del pending_punishments[punishment_key]
-        await query.edit_message_text("❌ Отменено")
+        await query.edit_message_text("❌ Наказание отменено")
+
+
 
 async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query

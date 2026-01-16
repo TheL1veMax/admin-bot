@@ -594,6 +594,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⚠️ Команды:\n"
         "/stats - ваша статистика отчетов\n"
         "/stats @username - статистика пользователя (СЗМ+)\n"
+        "/profile - ваш профиль модератора\n"
+        "/profile @username - профиль модератора (Ст. Мод+)\n"
         "/leaderboard - топ-15 модераторов и админов\n"
         "/history @username - история наказаний (СЗМ+)\n"
         "/vg - выдать выговор (СЗМ+)\n"
@@ -770,6 +772,168 @@ async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     except Exception as e:
         logger.error(f"Leaderboard error: {e}")
         await update.message.reply_text("❌ Ошибка получения топа")
+
+def calculate_rating(accepted: int, rejected: int, months_in_team: int) -> float:
+    """Расчёт гибридного рейтинга модератора"""
+    total = accepted + rejected
+    if total == 0:
+        return 0.0
+
+    # Базовый рейтинг - процент принятых
+    acceptance_rate = accepted / total
+    base_rating = acceptance_rate * 5.0
+
+    # Бонус за активность (+0.2 за каждые 50 отчётов, макс +0.6)
+    activity_bonus = min(0.6, (total // 50) * 0.2)
+
+    # Бонус за стаж (+0.1 за месяц, макс +0.3)
+    experience_bonus = min(0.3, months_in_team * 0.1)
+
+    # Штраф за отклонённые (-0.1 за каждые 10%)
+    rejection_rate = rejected / total
+    rejection_penalty = (rejection_rate * 10) * 0.1
+
+    # Итоговый рейтинг
+    final_rating = base_rating + activity_bonus + experience_bonus - rejection_penalty
+
+    # Ограничиваем 0.0 - 5.0
+    return max(0.0, min(5.0, final_rating))
+
+async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Просмотр профиля модератора"""
+    user = update.message.from_user
+    user_role = get_user_role(user.username)
+
+    if user_role is None:
+        await update.message.reply_text("❌ Вы не зарегистрированы в системе")
+        return
+
+    # Определяем чей профиль смотрим
+    if context.args:
+        # Смотрим чужой профиль
+        if user_role < Role.СТАРШИЙ_МОДЕРАТОР:
+            await update.message.reply_text("❌ Нет доступа! (только Ст. Модератор+)")
+            return
+
+        target_username = context.args[0].lstrip('@')
+        requester_info = f"\n👁️ Запрошен: @{user.username} ({user_role.name})"
+    else:
+        # Смотрим свой профиль
+        target_username = user.username
+        requester_info = ""
+
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                # Получаем данные пользователя
+                cur.execute("""
+                    SELECT u.user_id, u.username, u.full_name, u.created_at
+                    FROM users u
+                    WHERE LOWER(u.username) = LOWER(%s)
+                """, (target_username,))
+
+                user_data = cur.fetchone()
+
+                if not user_data:
+                    await update.message.reply_text("❌ Пользователь не найден")
+                    return
+
+                user_id, username, full_name, created_at = user_data
+
+                # Получаем статистику
+                cur.execute("""
+                    SELECT accepted, rejected
+                    FROM report_stats
+                    WHERE user_id = %s
+                """, (user_id,))
+
+                stats = cur.fetchone()
+
+                if stats:
+                    accepted, rejected = stats
+                else:
+                    accepted, rejected = 0, 0
+
+                total = accepted + rejected
+                success_rate = int((accepted / total * 100)) if total > 0 else 0
+
+                # Стаж в команде
+                now = datetime.now(MSK)
+                time_in_team = now - created_at.replace(tzinfo=MSK)
+                months_in_team = time_in_team.days // 30
+                days_remainder = time_in_team.days % 30
+
+                # Рейтинг
+                rating = calculate_rating(accepted, rejected, months_in_team)
+
+                # Место в топе
+                cur.execute("""
+                    SELECT COUNT(*) + 1
+                    FROM report_stats rs
+                    WHERE rs.accepted > %s
+                """, (accepted,))
+
+                position = cur.fetchone()[0]
+
+                # Всего модераторов
+                cur.execute("SELECT COUNT(*) FROM report_stats WHERE accepted > 0")
+                total_mods = cur.fetchone()[0]
+
+        # Получаем роль
+        target_role = get_user_role(username)
+        role_name = target_role.name if target_role is not None else "Модератор"
+
+        # Формируем сообщение
+        profile_text = f"👤 <b>ПРОФИЛЬ МОДЕРАТОРА</b>{requester_info}\n\n"
+        profile_text += f"@{username} | {full_name}\n"
+        profile_text += f"🎖 Роль: {role_name}\n"
+        profile_text += f"📅 В команде: {months_in_team} мес. {days_remainder} дн.\n\n"
+
+        profile_text += f"📊 <b>СТАТИСТИКА ОТЧЁТОВ:</b>\n"
+        profile_text += f"✅ Принято: {accepted}\n"
+        profile_text += f"❌ Отклонено: {rejected}\n"
+        profile_text += f"📈 Всего: {total}\n"
+        profile_text += f"💯 Процент успеха: {success_rate}%\n\n"
+
+        profile_text += f"🏆 <b>ДОСТИЖЕНИЯ:</b>\n"
+
+        # Медаль за место
+        if position == 1:
+            medal = "🥇"
+        elif position == 2:
+            medal = "🥈"
+        elif position == 3:
+            medal = "🥉"
+        else:
+            medal = "📊"
+
+        profile_text += f"{medal} Место в топе: #{position} из {total_mods}\n"
+        profile_text += f"⭐ Рейтинг: {rating:.1f} / 5.0\n"
+
+        # Особые статусы
+        if success_rate >= 95:
+            profile_text += f"🎯 Снайпер (95%+ принятых)\n"
+        if total >= 100:
+            profile_text += f"💪 Профессионал (100+ отчётов)\n"
+        if months_in_team >= 6:
+            profile_text += f"👑 Ветеран (6+ месяцев)\n"
+        if position <= 3:
+            profile_text += f"🏅 Топ-3 команды\n"
+
+        profile_text += f"\n📅 <b>АКТИВНОСТЬ:</b>\n"
+
+        # Визуальная полоска активности
+        total_bars = min(7, total // 10)  # 1 полоска = 10 отчётов
+        total_visual = "▓" * total_bars + "░" * (7 - total_bars)
+        profile_text += f"{total_visual} Всего отчётов: {total}\n"
+
+        profile_text += f"\n⏰ Обновлено: {now.strftime('%d.%m.%Y %H:%M')}"
+
+        await update.message.reply_text(profile_text, parse_mode='HTML')
+
+    except Exception as e:
+        logger.error(f"Profile error: {e}")
+        await update.message.reply_text("❌ Ошибка получения профиля")
 
 async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """История наказаний пользователя с пагинацией"""
@@ -1725,11 +1889,8 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
     status_emoji = "✅" if action == 'accept' else "❌"
     status_text = "ПРИНЯТ" if action == 'accept' else "ОТКЛОНЕН"
 
-    # Для СЗА и выше показываем имя и юзернейм, для остальных - только имя и юзернейм
-    if checker_role is not None and checker_role >= Role.СЗА:
-        checker_display = f"{checker_display_name} (@{checker.username})"
-    else:
-        checker_display = f"{checker_display_name} (@{checker.username})"
+    # Для всех показываем имя и юзернейм
+    checker_display = f"{checker_display_name} (@{checker.username})"
 
     final_caption = (
         f"{status_emoji} <b>Отчет {category_title} {status_text}</b>\n\n"
@@ -2325,6 +2486,7 @@ def main():
     application.add_handler(CommandHandler("sp", reset_accepted_command))
     application.add_handler(CommandHandler("so", reset_rejected_command))
     application.add_handler(CommandHandler("leaderboard", leaderboard_command))
+    application.add_handler(CommandHandler("profile", profile_command))
     application.add_handler(CommandHandler("history", history_command))
     application.add_handler(CallbackQueryHandler(history_pagination_callback, pattern='^history_(prev|next)_'))
     application.add_handler(CommandHandler("obv", announcement_command))

@@ -1386,6 +1386,7 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
 
     data = query.data
 
+    # Проверка на обжалование
     if data.startswith('appeal'):
         await handle_appeal_callback(update, context)
         return
@@ -1857,7 +1858,6 @@ async def send_punishment_dm(context: ContextTypes.DEFAULT_TYPE, violator_id: in
 
 async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data: dict, 
                             punishment_type: str, duration: str):
-    """Выполнение наказания"""
 
     violator_id = punishment_data['violator_id']
     violator_username = punishment_data['violator_username']
@@ -1922,28 +1922,30 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
             logger.info(f"Muted user {violator_id} for {duration}")
 
             # ЛОГ МУТА в канал
-            duration_text_log = "Навсегда" if duration == "forever" else duration
+            duration_text = "Навсегда" if duration == "forever" else duration
             end_date_ts = until_date if until_date else 0
             end_date = "—" if duration == "forever" else datetime.fromtimestamp(end_date_ts).strftime('%d.%m.%Y %H:%M')
 
             moderator_role = get_user_role_name(moderator_username)
-            approver_role_name = get_user_role_name(approver_username)
+            checker_role = get_user_role_name(approver_username)
 
             log_text = (
                 f"🔇 <b>ВЫДАН МУТ</b>\n\n"
                 f"👤 @{violator_username} (ID: {violator_id})\n"
                 f"📋 Правило: {rule}\n"
-                f"⏱ Длительность: {duration_text_log}\n"
+                f"⏱ Длительность: {duration_text}\n"
             )
             if duration != "forever":
                 log_text += f"🔚 До: {end_date}\n"
 
             log_text += (
-                f"\n🎖 Ранг: {moderator_role} (@{moderator_username})\n"
+                f"\n🎖 Ранг: {moderator_role} (@{callback_data.get('moderator_username', 'unknown')})\n"
             )
 
+            checker_username = approver_username.lower()
+            approver_role_enum = USERS_ROLES.get(approver_username_lower)
             if approver_role and approver_role >= Role.СЗА:
-                log_text += f"✅ Одобрил: {approver_role_name} (@{approver_username})\n"
+                log_text += f"✅ Одобрил: {approver_role_name} (@{callback_data.get('checker_username', 'unknown')})\n"
             else:
                 log_text += f"✅ Одобрил: {approver_role_name}\n"
 
@@ -1961,28 +1963,30 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
             logger.info(f"Banned user {violator_id} for {duration}")
 
             # ЛОГ БАНА в канал
-            duration_text_log = "Навсегда" if duration == "forever" else duration
+            duration_text = "Навсегда" if duration == "forever" else duration
             end_date_ts = until_date if until_date else 0
             end_date = "—" if duration == "forever" else datetime.fromtimestamp(end_date_ts).strftime('%d.%m.%Y %H:%M')
 
             moderator_role = get_user_role_name(moderator_username)
-            approver_role_name = get_user_role_name(approver_username)
+            checker_role = get_user_role_name(approver_username)
 
             log_text = (
                 f"🚫 <b>ВЫДАН БАН</b>\n\n"
                 f"👤 @{violator_username} (ID: {violator_id})\n"
                 f"📋 Правило: {rule}\n"
-                f"⏱ Длительность: {duration_text_log}\n"
+                f"⏱ Длительность: {duration_text}\n"
             )
             if duration != "forever":
                 log_text += f"🔚 До: {end_date}\n"
 
             log_text += (
-                f"\n🎖 Ранг: {moderator_role} (@{moderator_username})\n"
+                f"\n🎖 Ранг: {moderator_role} (@{callback_data.get('moderator_username', 'unknown')})\n"
             )
 
+            checker_username = approver_username.lower()
+            approver_role_enum = USERS_ROLES.get(approver_username_lower)
             if approver_role and approver_role >= Role.СЗА:
-                log_text += f"✅ Одобрил: {approver_role_name} (@{approver_username})\n"
+                log_text += f"✅ Одобрил: {approver_role_name} (@{callback_data.get('checker_username', 'unknown')})\n"
             else:
                 log_text += f"✅ Одобрил: {approver_role_name}\n"
 
@@ -1992,38 +1996,40 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
 
         elif punishment_type == 'warn':
             warn_count = get_active_warnings_count(violator_id)
-
-            moderator_role = get_user_role_name(moderator_username)
-            approver_role_name = get_user_role_name(approver_username)
-
-            log_text = (
-                f"⚠️ <b>ВЫДАН ВАРН</b> ({warn_count}/3)\n\n"
-                f"👤 @{violator_username} (ID: {violator_id})\n"
-                f"📋 Правило: {rule}\n"
-            )
-
             if warn_count >= MAX_WARNINGS:
-                log_text += f"\n⚠️ <b>Достигнуто {MAX_WARNINGS} варнов - автомут 12 часов!</b>\n"
-
-            log_text += f"\n🎖 Ранг: {moderator_role} (@{moderator_username})\n"
-
-            if approver_role and approver_role >= Role.СЗА:
-                log_text += f"✅ Одобрил: {approver_role_name} (@{approver_username})\n"
-            else:
-                log_text += f"✅ Одобрил: {approver_role_name}\n"
-
-            log_text += f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
-
-            await send_log(context, log_text)
-
-            if warn_count >= MAX_WARNINGS:
+                auto_mute_until = calculate_until_date('12h')
                 await context.bot.restrict_chat_member(
                     chat_id=f'@{PUBLIC_CHAT_USERNAME}',
                     user_id=violator_id,
                     permissions=ChatPermissions(can_send_messages=False),
-                    until_date=int((datetime.now(MSK) + timedelta(hours=AUTOMUTE_HOURS)).timestamp())
+                    until_date=auto_mute_until
                 )
-                logger.info(f"Auto-muted user {violator_id} for {AUTOMUTE_HOURS}h after {MAX_WARNINGS} warnings")
+                notification += f"\n\n🚫 <b>АВТОМУТ 12 ЧАСОВ</b>\n(3 варна)"
+                logger.info(f"Auto-muted user {violator_id} for 12h (3 warns)")
+
+        # ЛОГ ВАРНА в канал
+        warn_count = get_active_warnings_count(violator_id)
+        moderator_role = get_user_role_name(moderator_username)
+        checker_role = get_user_role_name(approver_username)
+
+        log_text = (
+            f"⚠️ <b>ВЫДАН ВАРН</b>\n\n"
+            f"👤 @{violator_username} (ID: {violator_id})\n"
+            f"📋 {rule}\n"
+            f"📊 Варнов: {warn_count}/3\n\n"
+            f"🎖 Ранг: {moderator_role} (@{callback_data.get('moderator_username', 'unknown')})\n"
+        )
+
+        checker_username = approver_username.lower()
+        approver_role_enum = USERS_ROLES.get(approver_username_lower)
+        if approver_role and approver_role >= Role.СЗА:
+            log_text += f"✅ Одобрил: {approver_role_name} (@{callback_data.get('checker_username', 'unknown')})\n"
+        else:
+            log_text += f"✅ Одобрил: {approver_role_name}\n"
+
+        log_text += f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
+
+        await send_log(context, log_text)
 
         # Отправляем ЛС пользователю о наказании
         await send_punishment_dm(
@@ -2033,7 +2039,7 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
             punishment_type,
             duration,
             rule,
-            punishment_data.get("photo", ""),
+            punishment_data["photo"],
             is_manual=False
         )
 
@@ -2052,7 +2058,6 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
 
     except Exception as e:
         logger.error(f"Failed to execute punishment: {e}")
-
 
 
 async def handle_appeal_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):

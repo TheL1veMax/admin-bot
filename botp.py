@@ -505,14 +505,14 @@ def get_user_role(username: str):
     clean_username = username.strip().lstrip('@').lower()
     return USERS_ROLES.get(clean_username)
 
-def can_check_report(checker_role, report_type: str):
-    if checker_role is None:
+def can_check_report(approver_role_name, report_type: str):
+    if approver_role_name is None:
         return False
-    if checker_role >= Role.СЗА:
+    if approver_role_name >= Role.СЗА:
         return True
-    if checker_role >= Role.СТАРШИЙ_АДМИН:
+    if approver_role_name >= Role.СТАРШИЙ_АДМИН:
         return True
-    if checker_role >= Role.АДМИН and report_type == 'moderator':
+    if approver_role_name >= Role.АДМИН and report_type == 'moderator':
         return True
     return False
 
@@ -1386,20 +1386,20 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
 
     data = query.data
 
-    # Проверка на обжалование - ПРАВИЛЬНЫЙ ОТСТУП 4 ПРОБЕЛА!
+    # Проверка на обжалование
     if data.startswith('appeal'):
         await handle_appeal_callback(update, context)
         return
 
-    if data.startswith('accept') or data.startswith('reject'):
+    if data.startswith('accept_') or data.startswith('reject_'):
         await handle_report_decision(update, context)
-    elif data.startswith('punish'):
+    elif data.startswith('punish_'):
         await handle_punishment_type(update, context)
-    elif data.startswith('duration'):
+    elif data.startswith('duration_'):
         await handle_punishment_duration(update, context)
-    elif data.startswith('confirm_duplicate'):
+    elif data.startswith('confirm_duplicate_'):
         await handle_duplicate_confirmation(update, context)
-    elif data.startswith('back_punishment'):
+    elif data.startswith('back_punishment_'):
         report_id = data.split('_')[-1]
         punishment_key = f"punishment_{report_id}"
 
@@ -1424,7 +1424,7 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
 
         await query.edit_message_text(punishment_text, parse_mode='HTML', reply_markup=reply_markup)
 
-    elif data.startswith('cancel_punishment'):
+    elif data.startswith('cancel_punishment_'):
         punishment_key = f"punishment_{data.split('_')[-1]}"
         if punishment_key in pending_punishments:
             del pending_punishments[punishment_key]
@@ -1442,9 +1442,9 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
     checker = query.from_user
     checker_display_name = get_display_name(checker)
     register_user(checker.id, checker.username, checker_display_name)
-    checker_role = get_user_role(checker.username)
+    approver_role_name = get_user_role(checker.username)
 
-    if not can_check_report(checker_role, category):
+    if not can_check_report(approver_role_name, category):
         await query.answer("❌ Нет прав!", show_alert=True)
         return
 
@@ -1463,7 +1463,7 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
     status_emoji = "✅" if action == 'accept' else "❌"
     status_text = "ПРИНЯТ" if action == 'accept' else "ОТКЛОНЕН"
 
-    checker_display = f"{checker_display_name} (@{checker.username})" if checker_role >= Role.СЗА else checker_role.name
+    checker_display = f"{checker_display_name} (@{checker.username})" if approver_role_name >= Role.СЗА else approver_role_name.name
 
     final_caption = (
         f"{status_emoji} <b>Отчет {category_title} {status_text}</b>\n\n"
@@ -1472,7 +1472,7 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
         f"📊 Принятых отчетов: {updated_stats['accepted']}\n"
         f"📝 Детали:\n{report['caption']}\n\n"
         f"👨‍💼 Проверил: {checker_display}\n"
-        f"🎖 Роль проверяющего: {checker_role.name}"
+        f"🎖 Роль проверяющего: {approver_role_name.name}"
     )
 
     await context.bot.send_photo(
@@ -1518,7 +1518,7 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
                     'moderator_username': report['sender_username'],
                     'approver_id': checker.id,
                     'approver_username': checker.username,
-                    'approver_role': checker_role,
+                    'approver_role': approver_role_name,
                     'rule': parsed['rule'],
                     'recommendation': parsed['recommendation'] or ''
                 }
@@ -1611,9 +1611,9 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
     punishment_data = pending_punishments[punishment_key]
     punishment_data['type'] = punishment_type
 
-    checker_role = get_user_role(query.from_user.username)
+    approver_role_name = get_user_role(query.from_user.username)
 
-    if not can_issue_punishment(checker_role):
+    if not can_issue_punishment(approver_role_name):
         await query.answer("❌ Нет прав на выдачу наказаний! (СЗМ+)", show_alert=True)
         return
 
@@ -1650,7 +1650,7 @@ async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_T
         del pending_punishments[punishment_key]
 
     else:
-        can_forever = can_punish_forever(checker_role)
+        can_forever = can_punish_forever(approver_role_name)
 
         keyboard = [
             [
@@ -1698,9 +1698,9 @@ async def handle_punishment_duration(update: Update, context: ContextTypes.DEFAU
     violator_id = punishment_data['violator_id']
     rule = punishment_data['rule']
 
-    checker_role = get_user_role(query.from_user.username)
+    approver_role_name = get_user_role(query.from_user.username)
 
-    if duration == 'forever' and not can_punish_forever(checker_role):
+    if duration == 'forever' and not can_punish_forever(approver_role_name):
         await query.answer("❌ Нет прав на бессрочные наказания! (только ЗГА и СЗА)", show_alert=True)
         return
 
@@ -1939,13 +1939,13 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
                 log_text += f"🔚 До: {end_date}\n"
 
             log_text += (
-                f"\n🎖 Ранг: {moderator_role} (@{moderator_username})\n"
+                f"\n🎖 Ранг: {moderator_role} (@{callback_data.get('moderator_username', 'unknown')})\n"
             )
 
-            approver_username_lower = approver_username.lower()
+            checker_username = approver_username.lower()
             approver_role_enum = USERS_ROLES.get(approver_username_lower)
             if approver_role and approver_role >= Role.СЗА:
-                log_text += f"✅ Одобрил: {approver_role_name} (@{approver_username})\n"
+                log_text += f"✅ Одобрил: {approver_role_name} (@{callback_data.get('checker_username', 'unknown')})\n"
             else:
                 log_text += f"✅ Одобрил: {approver_role_name}\n"
 
@@ -1980,13 +1980,13 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
                 log_text += f"🔚 До: {end_date}\n"
 
             log_text += (
-                f"\n🎖 Ранг: {moderator_role} (@{moderator_username})\n"
+                f"\n🎖 Ранг: {moderator_role} (@{callback_data.get('moderator_username', 'unknown')})\n"
             )
 
-            approver_username_lower = approver_username.lower()
+            checker_username = approver_username.lower()
             approver_role_enum = USERS_ROLES.get(approver_username_lower)
             if approver_role and approver_role >= Role.СЗА:
-                log_text += f"✅ Одобрил: {approver_role_name} (@{approver_username})\n"
+                log_text += f"✅ Одобрил: {approver_role_name} (@{callback_data.get('checker_username', 'unknown')})\n"
             else:
                 log_text += f"✅ Одобрил: {approver_role_name}\n"
 
@@ -2015,23 +2015,21 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
         log_text = (
             f"⚠️ <b>ВЫДАН ВАРН</b>\n\n"
             f"👤 @{violator_username} (ID: {violator_id})\n"
-            f"📋 {callback_data.get('rule', 'Не указано')}\n"
+            f"📋 {rule}\n"
             f"📊 Варнов: {warn_count}/3\n\n"
             f"🎖 Ранг: {moderator_role} (@{callback_data.get('moderator_username', 'unknown')})\n"
         )
 
-        approver_username_lower = approver_username.lower()
+        checker_username = approver_username.lower()
         approver_role_enum = USERS_ROLES.get(approver_username_lower)
         if approver_role and approver_role >= Role.СЗА:
-            log_text += f"✅ Одобрил: {approver_role_name} (@{approver_username})\n"
+            log_text += f"✅ Одобрил: {approver_role_name} (@{callback_data.get('checker_username', 'unknown')})\n"
         else:
             log_text += f"✅ Одобрил: {approver_role_name}\n"
 
         log_text += f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
 
         await send_log(context, log_text)
-
-        msg = await context.bot.send_message(
 
         # Отправляем ЛС пользователю о наказании
         await send_punishment_dm(
@@ -2045,6 +2043,8 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
             is_manual=False
         )
 
+        # Отправляем уведомление в публичный чат
+        msg = await context.bot.send_message(
             chat_id=f"@{PUBLIC_CHAT_USERNAME}",
             text=notification,
             parse_mode='HTML'

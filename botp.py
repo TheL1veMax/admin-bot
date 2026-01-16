@@ -70,16 +70,16 @@ USERS_ROLES = {
     'anayka_lol': Role.МЛ_АДМИН,
     'matnozdra': Role.МЛ_АДМИН,
     'stmoder': Role.СТАРШИЙ_МОДЕРАТОР,
-    'miwa123009': Role.СТАРШИЙ_МОДЕРАТОР,
-    'breakbrosmiling': Role.СТАРШИЙ_МОДЕРАТОР,
-    'unbesiegbar_s': Role.МОДЕРАТОР,
-    'grechka_aw': Role.МОДЕРАТОР,
-    'spl1ntexxx': Role.МОДЕРАТОР,
-    'svezhiy_vozdyx': Role.МОДЕРАТОР,
-    'S1mka2': Role.МОДЕРАТОР,
+    'st_moder2': Role.СТАРШИЙ_МОДЕРАТОР,
+    'breakbrosmiling': Role.МОДЕРАТОР,
+    'bosspogranki': Role.МОДЕРАТОР,
+    'spearskill': Role.МОДЕРАТОР,
+    'neverexikid': Role.МОДЕРАТОР,
+    'finn_wolfhard1223': Role.МОДЕРАТОР,
+    'miwa123009': Role.МОДЕРАТОР,
     'sportaisam': Role.МОДЕРАТОР,
     'rusich_group35': Role.МОДЕРАТОР,
-    'murmes': Role.МОДЕРАТОР
+    'za_spartakmsk': Role.МОДЕРАТОР
 }
 
 reports_data = {}
@@ -1384,6 +1384,10 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
 
     data = query.data
 
+        if data.startswith('appeal'):
+            await handle_appeal_callback(update, context)
+            return
+
     if data.startswith('accept_') or data.startswith('reject_'):
         await handle_report_decision(update, context)
     elif data.startswith('punish_'):
@@ -1763,6 +1767,87 @@ async def handle_duplicate_confirmation(update: Update, context: ContextTypes.DE
 
     del pending_punishments[punishment_key]
 
+
+async def send_punishment_dm(context: ContextTypes.DEFAULT_TYPE, violator_id: int, violator_username: str,
+                            punishment_type: str, duration: str, rule: str, photo_file_id: str, 
+                            is_manual: bool = False):
+    """Отправка ЛС пользователю о наказании с возможностью обжалования"""
+
+    # Эмодзи для типов наказаний
+    punishment_emoji = {
+        'mute': '🔇',
+        'warn': '⚠️',
+        'ban': '🚫'
+    }
+
+    emoji = punishment_emoji.get(punishment_type, '⚠️')
+
+    # Название наказания
+    punishment_names = {
+        'mute': 'Мут',
+        'warn': 'Предупреждение',
+        'ban': 'Бан'
+    }
+
+    punishment_name = punishment_names.get(punishment_type, punishment_type.upper())
+
+    # Длительность человекочитаемая
+    duration_readable = {
+        '1h': '1 час',
+        '2h': '2 часа',
+        '6h': '6 часов',
+        '12h': '12 часов',
+        '1d': '1 день',
+        '3d': '3 дня',
+        '7d': '7 дней',
+        '30d': '30 дней',
+        'forever': 'Навсегда',
+        'once': '1 предупреждение'
+    }
+
+    duration_text = duration_readable.get(duration, duration)
+
+    # Формируем сообщение
+    if is_manual:
+        message = f"{emoji} <b>Вы получили {punishment_name}</b>\n\n"
+        message += f"📋 <b>Правило:</b> {rule}\n"
+        if duration != 'once':
+            message += f"⏱ <b>Длительность:</b> {duration_text}\n\n"
+        else:
+            message += "\n"
+        message += f"ℹ️ Наказание было выдано вручную в соответствии с правилами\n\n"
+        message += f"📞 <b>Обжаловать наказание:</b> @gerrinetwork"
+    else:
+        message = f"{emoji} <b>Вы получили {punishment_name}</b>\n\n"
+        message += f"📋 <b>Правило:</b> {rule}\n"
+        if duration != 'once':
+            message += f"⏱ <b>Длительность:</b> {duration_text}\n\n"
+        else:
+            message += "\n"
+        message += f"📞 <b>Обжаловать наказание:</b> @gerrinetwork"
+
+    # Кнопка обжалования
+    keyboard = [
+        [InlineKeyboardButton("📝 Обжаловать наказание", 
+                             callback_data=f"appeal_{violator_id}_{punishment_type}_{duration}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    try:
+        # Отправляем фото с сообщением в ЛС
+        await context.bot.send_photo(
+            chat_id=violator_id,
+            photo=photo_file_id,
+            caption=message,
+            parse_mode='HTML',
+            reply_markup=reply_markup
+        )
+        logger.info(f"✅ Отправлено ЛС пользователю {violator_id} о наказании")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Не удалось отправить ЛС пользователю {violator_id}: {e}")
+        return False
+
 async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data: dict, 
                             punishment_type: str, duration: str):
 
@@ -1939,6 +2024,19 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
         await send_log(context, log_text)
 
         msg = await context.bot.send_message(
+
+        # Отправляем ЛС пользователю о наказании
+        await send_punishment_dm(
+            context,
+            violator_id,
+            violator_username,
+            punishment_type,
+            duration,
+            rule,
+            punishment_data["photo"],
+            is_manual=False
+        )
+
             chat_id=f"@{PUBLIC_CHAT_USERNAME}",
             text=notification,
             parse_mode='HTML'
@@ -1952,6 +2050,70 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
 
     except Exception as e:
         logger.error(f"Failed to execute punishment: {e}")
+
+
+async def handle_appeal_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка обжалования наказания"""
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data  # appeal_<user_id>_<type>_<duration>
+    parts = data.split('_')
+
+    if len(parts) < 4:
+        await query.answer("❌ Ошибка данных", show_alert=True)
+        return
+
+    violator_id = int(parts[1])
+    punishment_type = parts[2]
+    duration = parts[3]
+
+    user = query.from_user
+    user_display = get_display_name(user)
+
+    # Эмодзи для типов
+    punishment_emoji = {
+        'mute': '🔇 Мут',
+        'warn': '⚠️ Предупреждение',
+        'ban': '🚫 Бан'
+    }
+
+    punishment_name = punishment_emoji.get(punishment_type, punishment_type.upper())
+
+    # Формируем сообщение об обжаловании
+    appeal_message = f"📝 <b>ОБЖАЛОВАНИЕ НАКАЗАНИЯ</b>\n\n"
+    appeal_message += f"👤 <b>Пользователь:</b> {user.mention_html()} (@{user.username or 'нет username'})\n"
+    appeal_message += f"🆔 <b>ID:</b> <code>{violator_id}</code>\n"
+    appeal_message += f"⚠️ <b>Тип наказания:</b> {punishment_name}\n"
+    appeal_message += f"⏱ <b>Длительность:</b> {duration}\n\n"
+    appeal_message += f"💬 <i>Пользователь хочет обжаловать наказание.\nДля рассмотрения обращения свяжитесь с ним.</i>"
+
+    try:
+        # Отправляем СЗА (@gerrinetwork)
+        gerri_id, gerri_name = find_user_id_by_username('gerrinetwork')
+
+        if gerri_id:
+            await context.bot.send_message(
+                chat_id=gerri_id,
+                text=appeal_message,
+                parse_mode='HTML'
+            )
+
+            # Отправляем также в лог канал
+            await send_log(context, appeal_message)
+
+            # Убираем кнопку и добавляем статус
+            await query.edit_message_caption(
+                caption=query.message.caption + "\n\n✅ <b>Обжалование отправлено СЗА (@gerrinetwork)</b>",
+                parse_mode='HTML'
+            )
+        else:
+            await query.answer("❌ СЗА не найден в системе", show_alert=True)
+
+    except Exception as e:
+        logger.error(f"Ошибка отправки обжалования: {e}")
+        await query.answer("❌ Ошибка отправки обжалования", show_alert=True)
+
 
 async def handle_main_chat_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Автосохранение пользователей"""
@@ -2019,6 +2181,5 @@ if __name__ == '__main__':
             )
         )
         logger.info(f"⏰ Принятый отчёт будет удалён через 2 мин")
-
 
 

@@ -577,7 +577,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_display_name = get_display_name(user)
     register_user(user.id, user.username, user_display_name)
     user_role = get_user_role(user.username)
-    role_name = user_role.name if user_role else "Не назначена"
+    role_name = user_role.name if user_role is not None else "Не назначена"
 
     message_text = (
         "✅ Бот для проверки отчетов модерации запущен!\n\n"
@@ -1938,11 +1938,11 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
         log_text += f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
         await send_log(context, log_text)
 
-        # УДАЛЕНИЕ ОТЧЁТА
+        # Удаление отчёта
         if report_message_id and report_topic_id:
             try:
                 await context.bot.delete_message(chat_id=MAIN_CHAT_ID, message_id=report_message_id)
-                logger.info(f"✅ Deleted report message {report_message_id} from topic {report_topic_id}")
+                logger.info(f"✅ Deleted report {report_message_id}")
             except Exception as e:
                 logger.error(f"❌ Delete error: {e}")
 

@@ -703,12 +703,18 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, stats_msg.message_id], DELETE_AFTER_SECONDS))
 
 
+async def delete_message_job(context, chat_id, message_id):
+    """Удаление сообщения"""
+    try:
+        await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except:
+        pass
+
 async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Топ модераторов и админов по принятым отчётам"""
+    """Топ модераторов и админов"""
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                # ПРАВИЛЬНЫЙ запрос: accepted и rejected это колонки-счётчики
                 cur.execute("""
                     SELECT 
                         u.username,
@@ -749,16 +755,13 @@ async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         leaderboard_text += f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
 
-        # Отправляем с автоудалением через 3 минуты
         sent_msg = await update.message.reply_text(leaderboard_text, parse_mode='HTML')
 
-        # Удаляем команду пользователя
         try:
             await update.message.delete()
         except:
             pass
 
-        # Удаляем ответ через 3 минуты (180 секунд)
         context.job_queue.run_once(
             lambda c: delete_message_job(c, update.message.chat_id, sent_msg.message_id),
             180
@@ -767,15 +770,6 @@ async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     except Exception as e:
         logger.error(f"Leaderboard error: {e}")
         await update.message.reply_text("❌ Ошибка получения топа")
-
-async def delete_message_job(context, chat_id, message_id):
-    """Удаление сообщения"""
-    try:
-        await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
-    except:
-        pass
-
-
 
 async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """История наказаний пользователя с пагинацией"""
@@ -841,12 +835,10 @@ async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"✅ Нет наказаний",
                 parse_mode='HTML'
             )
-            # Удаляем команду
             try:
                 await update.message.delete()
             except:
                 pass
-            # Удаляем ответ через 5 минут
             context.job_queue.run_once(
                 lambda c: delete_message_job(c, update.message.chat_id, msg.message_id),
                 300
@@ -858,13 +850,11 @@ async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'punishments': punishments,
             'target_username': target_username,
             'target_id': target_id,
-            'page': 0,
-            'command_message_id': update.message.message_id
+            'page': 0
         }
 
         await send_history_page(update.message.chat_id, pagination_key, context, is_reply=True, message=update.message)
 
-        # Удаляем команду
         try:
             await update.message.delete()
         except:
@@ -937,9 +927,7 @@ async def send_history_page(chat_id, pagination_key, context, page=None, is_repl
 
     if is_reply and message:
         sent_msg = await message.reply_text(history_text, parse_mode='HTML', reply_markup=keyboard)
-        # Сохраняем ID ответа для удаления
         data['response_message_id'] = sent_msg.message_id
-        # Удаляем через 5 минут (300 секунд)
         context.job_queue.run_once(
             lambda c: delete_message_job(c, chat_id, sent_msg.message_id),
             300
@@ -1737,7 +1725,11 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
     status_emoji = "✅" if action == 'accept' else "❌"
     status_text = "ПРИНЯТ" if action == 'accept' else "ОТКЛОНЕН"
 
-    checker_display = f"{checker_display_name} (@{checker.username})" if checker_role >= Role.СЗА else checker_role.name
+    # Для СЗА и выше показываем имя и юзернейм, для остальных - только имя и юзернейм
+    if checker_role is not None and checker_role >= Role.СЗА:
+        checker_display = f"{checker_display_name} (@{checker.username})"
+    else:
+        checker_display = f"{checker_display_name} (@{checker.username})"
 
     final_caption = (
         f"{status_emoji} <b>Отчет {category_title} {status_text}</b>\n\n"

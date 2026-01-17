@@ -2291,100 +2291,6 @@ async def handle_main_chat_message(update: Update, context: ContextTypes.DEFAULT
     except Exception as e:
         logger.error(f"❌ {e}", exc_info=True)
 
-
-async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показать профиль пользователя"""
-    message = update.message
-    user = message.from_user
-    user_display_name = get_display_name(user)
-    register_user(user.id, user.username, user_display_name)
-    user_role = get_user_role(user.username)
-
-    # Определяем целевого пользователя
-    target_user_id = user.id
-    target_username = user.username or str(user.id)
-    target_full_name = user_display_name
-
-    # Если указан аргумент - смотрим чужой профиль
-    if context.args:
-        if not can_view_others_stats(user_role):
-            error_msg = await message.reply_text("❌ У вас нет прав просматривать чужую статистику!")
-            asyncio.create_task(delete_messages_after_delay(context, message.chat_id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
-            return
-
-        target_username = context.args[0].lstrip('@')
-
-        # Проверяем text_mention
-        if message.entities:
-            for entity in message.entities:
-                if entity.type == "text_mention":
-                    target_user = entity.user
-                    if target_user.id != 1087968824:
-                        target_user_id = target_user.id
-                        target_username = target_user.username or str(target_user.id)
-                        target_full_name = get_display_name(target_user)
-                        register_user(target_user_id, target_user.username, target_full_name)
-                        break
-
-        if target_user_id == user.id:
-            found_id, found_name = find_user_id_by_username(target_username)
-            if found_id:
-                target_user_id = found_id
-                target_full_name = found_name or f"@{target_username}"
-            else:
-                error_msg = await message.reply_text(f"❌ Пользователь @{target_username} не найден!")
-                asyncio.create_task(delete_messages_after_delay(context, message.chat_id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
-                return
-
-    try:
-        # Получаем статистику
-        user_stats = get_user_stats(target_user_id)
-        accepted = user_stats['accepted']
-        rejected = user_stats['rejected']
-
-        # Получаем created_at из БД
-        with get_db_connection() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("SELECT created_at FROM users WHERE user_id = %s", (target_user_id,))
-                result = cur.fetchone()
-                created_at = result['created_at'] if result and result.get('created_at') else datetime.now(MSK)
-
-        # Считаем стаж
-        now = datetime.now(MSK)
-        try:
-            if isinstance(created_at, datetime):
-                time_in_team = now - created_at.replace(tzinfo=MSK)
-            else:
-                time_in_team = now - datetime.fromisoformat(str(created_at)).replace(tzinfo=MSK)
-            months_in_team = time_in_team.days // 30
-            days_remainder = time_in_team.days % 30
-        except:
-            months_in_team = 0
-            days_remainder = 0
-
-        # Получаем роль
-        target_role = get_user_role(target_username if isinstance(target_username, str) and not target_username.isdigit() else None)
-        rolename = target_role.name if target_role else "Пользователь"
-
-        profile_text = f"""🆔 <b>ID:</b> <code>{target_user_id}</code>
-👤 <b>Имя:</b> {target_full_name}
-🆔 <b>Username:</b> @{target_username}
-🎭 <b>Роль:</b> {rolename}
-
-📊 <b>Статистика:</b>
-✅ Принято: <b>{accepted}</b>
-❌ Отклонено: <b>{rejected}</b>
-📈 Всего: <b>{accepted + rejected}</b>
-
-⏱ <b>Стаж в команде:</b> {months_in_team}м {days_remainder}д"""
-
-        profile_msg = await message.reply_text(profile_text, parse_mode='HTML')
-        asyncio.create_task(delete_messages_after_delay(context, message.chat_id, [message.message_id, profile_msg.message_id], DELETE_AFTER_SECONDS))
-
-    except Exception as e:
-        logger.error(f"Profile error: {e}")
-        await message.reply_text("❌ Ошибка получения профиля")
-
 def main():
     if not DATABASE_URL:
         logger.error("❌ DATABASE_URL не задан!")
@@ -2405,7 +2311,6 @@ def main():
     application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_main_chat_message))
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("stats", stats_command))
-    application.add_handler(CommandHandler("profile", profile))
     application.add_handler(CommandHandler("vg", warning_command))
     application.add_handler(CommandHandler("svg", remove_warning_command))
     application.add_handler(CommandHandler("bl", blacklist_command))

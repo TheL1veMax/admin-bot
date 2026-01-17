@@ -703,6 +703,13 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, stats_msg.message_id], DELETE_AFTER_SECONDS))
 
 
+async def delete_message_job(context, chat_id, message_id):
+    """Удаление сообщения"""
+    try:
+        await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except:
+        pass
+
 async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Топ модераторов и админов"""
     try:
@@ -2346,3 +2353,5 @@ if __name__ == '__main__':
 
 
 
+
+# ✅ ФИКС УВЕДОМЛЕНИЙ: PUBLIC_CHAT_ID удаление через 2 мин

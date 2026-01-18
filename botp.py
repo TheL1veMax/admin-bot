@@ -66,7 +66,7 @@ USERS_ROLES = {
     'mskmboky': Role.СТАРШИЙ_АДМИН,
     'whysparky': Role.СЗМ,
     'maga8c': Role.АДМИН,
-    'qwelex_z': Role.КУРАТОР,
+    'kurator_z': Role.КУРАТОР,
     'anayka_lol': Role.МЛ_АДМИН,
     'matnozdra': Role.МЛ_АДМИН,
     'stmoder': Role.СТАРШИЙ_МОДЕРАТОР,
@@ -79,7 +79,7 @@ USERS_ROLES = {
     'murmes': Role.МОДЕРАТОР,
     'sportaisam': Role.МОДЕРАТОР,
     'rusich_group35': Role.МОДЕРАТОР,
-    'modtgi': Role.МОДЕРАТОР,
+    'qwelex_z': Role.МОДЕРАТОР,
     's1mka2': Role.МОДЕРАТОР
 }
 

@@ -2233,6 +2233,8 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
         elif punishment_type == 'ban':
             until_date = calculate_until_date(duration)
             await context.bot.ban_chat_member(chat_id=PUBLIC_CHAT_ID, user_id=violator_id, until_date=until_date)
+        elif punishment_type == 'warn':
+            add_warning(violator_id, violator_name, violator_username, rule, moderator_username)
 
         try:
             pub_msg = await context.bot.send_message(chat_id=PUBLIC_CHAT_ID, text=notification, parse_mode='HTML')

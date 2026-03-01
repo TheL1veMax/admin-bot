@@ -2336,6 +2336,7 @@ async def handle_main_chat_message(update: Update, context: ContextTypes.DEFAULT
 
 
 # ==================== ОБЖАЛОВАНИЯ ====================
+reject_states = {}
 
 # Хранилище активных заявок на обжалование
 # appeal_id -> {user_id, username, full_name, punishment_id, punishment_type, duration, rule,
@@ -2540,10 +2541,13 @@ async def appeal_reason_callback(update: Update, context: ContextTypes.DEFAULT_T
     appeal_states[user.id]['reason'] = reason_text
     appeal_states[user.id]['step'] = 'text'
 
+    skip_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⏭ Пропустить", callback_data="appeal_skip_text")]])
     await query.message.reply_text(
         f"✅ Причина: <b>{reason_text}</b>\n\n"
-        "✍️ Напишите подробное описание вашей ситуации (или отправьте /skip чтобы пропустить):",
-        parse_mode='HTML'
+        "✍️ Напишите подробное описание вашей ситуации\n"
+        "или нажмите кнопку ниже чтобы пропустить:",
+        parse_mode='HTML',
+        reply_markup=skip_kb
     )
 
 
@@ -2561,8 +2565,11 @@ async def handle_appeal_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     appeal_states[user.id]['step'] = 'photo'
 
+    skip_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⏭ Пропустить", callback_data="appeal_skip_photo")]])
     await update.message.reply_text(
-        "📎 Прикрепите скриншот/фото как доказательство (или отправьте /skip чтобы пропустить):"
+        "📎 Прикрепите скриншот/фото как доказательство\n"
+        "или нажмите кнопку ниже чтобы пропустить:",
+        reply_markup=skip_kb
     )
     return True
 
@@ -2592,7 +2599,12 @@ async def handle_appeal_skip(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if step == 'text':
         appeal_states[user.id]['text'] = None
         appeal_states[user.id]['step'] = 'photo'
-        await update.message.reply_text("📎 Прикрепите скриншот/фото или /skip:")
+        skip_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⏭ Пропустить", callback_data="appeal_skip_photo")]])
+        await update.message.reply_text(
+            "📎 Прикрепите скриншот/фото как доказательство\n"
+            "или нажмите кнопку ниже чтобы пропустить:",
+            reply_markup=skip_kb
+        )
         return True
     elif step == 'photo':
         appeal_states[user.id]['photo_file_id'] = None
@@ -2633,9 +2645,8 @@ async def submit_appeal(update, context, user):
     }
 
     await update.message.reply_text(
-        "✅ <b>Заявка на обжалование отправлена!</b>\n\n"
-        f"🆔 Номер заявки: <b>#{appeal_id}</b>\n"
-        "⏳ Ожидайте рассмотрения Техническим Специалистом или СЗА.",
+        f"📨 Ваша жалоба <b>#{appeal_id}</b> отправлена на рассмотрение к администрации.\n\n"
+        "⏳ Ожидайте ответа.",
         parse_mode='HTML'
     )
 
@@ -2653,19 +2664,22 @@ async def obn_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Нет доступа! (только ТС и СЗА+)")
         return
 
-    pending = {aid: a for aid, a in active_appeals.items() if a['status'] == 'pending'}
+    active = {aid: a for aid, a in active_appeals.items()
+               if a['status'] in ('pending', 'in_progress')}
 
-    if not pending:
+    if not active:
         await update.message.reply_text("📭 Нет активных заявок на обжалование.")
         return
 
-    text = f"📋 <b>Активные заявки на обжалование ({len(pending)}):</b>\n\nВыберите заявку:"
+    text = f"📋 <b>Активные заявки на обжалование ({len(active)}):</b>\n\nВыберите заявку:"
     buttons = []
-    for aid, a in pending.items():
+    STATUS_ICON = {'pending': '🕐', 'in_progress': '🔍'}
+    for aid, a in active.items():
         ptype = PUN_TYPE_NAME.get(a['punishment_type'], a['punishment_type'])
         dur = DUR_TEXT.get(a['duration'], a['duration'])
         uname = f"@{a['username']}" if a['username'] else a['full_name']
-        label = f"#{aid} {uname} — {ptype} {dur}"
+        icon = STATUS_ICON.get(a['status'], '🕐')
+        label = f"{icon} #{aid} {uname} — {ptype} {dur}"
         buttons.append([InlineKeyboardButton(label, callback_data=f"obn_view_{aid}")])
 
     await update.message.reply_text(text, parse_mode='HTML', reply_markup=InlineKeyboardMarkup(buttons))
@@ -2750,9 +2764,17 @@ async def obn_work_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await query.message.reply_text(details_text, parse_mode='HTML')
 
+    action_kb = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Одобрить", callback_data=f"obn_approve_{appeal_id}"),
+            InlineKeyboardButton("❌ Отклонить", callback_data=f"obn_reject_{appeal_id}")
+        ]
+    ])
     await query.message.reply_text(
-        f"✅ Заявка #{appeal_id} взята в работу.\n"
-        f"Для закрытия введите: /zk {appeal_id}"
+        f"✅ Заявка <b>#{appeal_id}</b> взята в работу.\n"
+        "Выберите решение:",
+        parse_mode='HTML',
+        reply_markup=action_kb
     )
 
 
@@ -2784,24 +2806,28 @@ async def zk_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Заявка #{appeal_id} не найдена")
         return
 
-    a['status'] = 'closed'
     handler_role_name = get_user_role_name(user.username)
 
-    # Уведомление пользователю
+    # Уведомление пользователю — заявка остаётся в списке до одобрения/отклонения
     try:
         await context.bot.send_message(
             chat_id=a['user_id'],
             text=(
                 f"📋 <b>Заявка на обжалование #{appeal_id}</b>\n\n"
-                f"❌ Ваша заявка была закрыта.\n"
-                f"👤 Закрыл: <b>{handler_role_name}</b>"
+                f"🔍 Ваша заявка принята в работу.\n"
+                f"👤 Рассматривает: <b>{handler_role_name}</b>\n\n"
+                f"⏳ Ожидайте финального решения."
             ),
             parse_mode='HTML'
         )
     except Exception as e:
-        logger.error(f"Не удалось уведомить пользователя об закрытии заявки: {e}")
+        logger.error(f"Не удалось уведомить пользователя об обработке заявки: {e}")
 
-    await update.message.reply_text(f"✅ Заявка #{appeal_id} закрыта. Пользователь уведомлён.")
+    await update.message.reply_text(
+        f"✅ Пользователь уведомлён о том, что заявка <b>#{appeal_id}</b> принята в работу.\n"
+        f"Заявка остаётся в списке до одобрения или отклонения.",
+        parse_mode='HTML'
+    )
 
 
 # ---- Кнопка "Назад к старту" ----
@@ -2824,23 +2850,208 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     user = update.message.from_user
+
+    # Сначала проверяем ввод причины отклонения (ТС/СЗА)
+    if user.id in reject_states:
+        await handle_reject_reason(update, context)
+        return
+
     if user.id not in appeal_states:
         return
 
     step = appeal_states[user.id].get('step')
 
     if step == 'text':
-        if update.message.text and update.message.text.startswith('/skip'):
-            await handle_appeal_skip(update, context)
-        elif update.message.text:
+        if update.message.text:
             await handle_appeal_text(update, context)
     elif step == 'photo':
-        if update.message.text and update.message.text.startswith('/skip'):
-            await handle_appeal_skip(update, context)
-        elif update.message.photo:
+        if update.message.photo:
             await handle_appeal_photo(update, context)
         else:
-            await update.message.reply_text("📎 Пожалуйста, отправьте фото или /skip")
+            await update.message.reply_text("📎 Пожалуйста, отправьте фото или нажмите кнопку «Пропустить»")
+
+
+
+
+# ---- Пропустить описание (кнопка) ----
+async def appeal_skip_text_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+
+    if user.id not in appeal_states:
+        await query.answer("❌ Сессия устарела", show_alert=True)
+        return
+
+    appeal_states[user.id]['text'] = None
+    appeal_states[user.id]['step'] = 'photo'
+
+    skip_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⏭ Пропустить", callback_data="appeal_skip_photo")]])
+    await query.message.reply_text(
+        "📎 Прикрепите скриншот/фото как доказательство\n"
+        "или нажмите кнопку ниже чтобы пропустить:",
+        reply_markup=skip_kb
+    )
+
+
+# ---- Пропустить фото (кнопка) ----
+async def appeal_skip_photo_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+
+    if user.id not in appeal_states:
+        await query.answer("❌ Сессия устарела", show_alert=True)
+        return
+
+    appeal_states[user.id]['photo_file_id'] = None
+    # Нужно передать update.callback_query.message как update-like объект
+    # Создаём "псевдо"-submit через message из callback
+    state = appeal_states.pop(user.id, {})
+    pun_id = state.get('punishment_id')
+    p = get_punishment_by_id(pun_id)
+
+    if not p:
+        await query.message.reply_text("❌ Ошибка: наказание не найдено.")
+        return
+
+    appeal_counter[0] += 1
+    appeal_id = appeal_counter[0]
+
+    active_appeals[appeal_id] = {
+        'appeal_id': appeal_id,
+        'user_id': user.id,
+        'username': user.username,
+        'full_name': get_display_name(user),
+        'punishment_id': pun_id,
+        'punishment_type': p['punishment_type'],
+        'duration': p['duration'],
+        'rule': p['rule'],
+        'issued_by_username': p['issued_by_username'],
+        'reason': state.get('reason', 'Не указана'),
+        'text': state.get('text'),
+        'photo_file_id': None,
+        'status': 'pending',
+        'created_at': datetime.now(MSK),
+        'handler_id': None
+    }
+
+    await query.message.reply_text(
+        f"📨 Ваша жалоба <b>#{appeal_id}</b> отправлена на рассмотрение к администрации.\n\n"
+        "⏳ Ожидайте ответа.",
+        parse_mode='HTML'
+    )
+
+
+# ---- Одобрить обжалование ----
+async def obn_approve_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+    user_role = get_user_role(user.username)
+
+    if not can_handle_appeal(user_role):
+        await query.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    appeal_id = int(query.data.replace("obn_approve_", ""))
+    a = active_appeals.get(appeal_id)
+
+    if not a:
+        await query.answer("❌ Заявка не найдена", show_alert=True)
+        return
+
+    a['status'] = 'approved'
+    handler_role_name = get_user_role_name(user.username)
+
+    # Уведомить пользователя
+    try:
+        await context.bot.send_message(
+            chat_id=a['user_id'],
+            text=(
+                f"✅ <b>Обжалование было одобрено</b>\n\n"
+                f"👤 Одобрил: <b>{handler_role_name}</b>\n"
+                f"🔓 Все ограничения сняты."
+            ),
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        logger.error(f"Ошибка уведомления об одобрении: {e}")
+
+    await query.message.reply_text(
+        f"✅ Заявка <b>#{appeal_id}</b> одобрена. Пользователь уведомлён.",
+        parse_mode='HTML'
+    )
+
+
+# ---- Отклонить обжалование (шаг 1 — запрос причины) ----
+async def obn_reject_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+    user_role = get_user_role(user.username)
+
+    if not can_handle_appeal(user_role):
+        await query.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    appeal_id = int(query.data.replace("obn_reject_", ""))
+    a = active_appeals.get(appeal_id)
+
+    if not a:
+        await query.answer("❌ Заявка не найдена", show_alert=True)
+        return
+
+    reject_states[user.id] = {'appeal_id': appeal_id}
+
+    await query.message.reply_text(
+        f"📝 Укажите причину отклонения заявки <b>#{appeal_id}</b>:\n"
+        "(Напишите причину следующим сообщением)",
+        parse_mode='HTML'
+    )
+
+
+# ---- Получение причины отклонения ----
+async def handle_reject_reason(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.message.from_user
+
+    if user.id not in reject_states:
+        return False
+
+    user_role = get_user_role(user.username)
+    if not can_handle_appeal(user_role):
+        return False
+
+    appeal_id = reject_states.pop(user.id)['appeal_id']
+    a = active_appeals.get(appeal_id)
+
+    if not a:
+        await update.message.reply_text("❌ Заявка не найдена.")
+        return True
+
+    a['status'] = 'rejected'
+    handler_role_name = get_user_role_name(user.username)
+    reject_reason = update.message.text
+
+    # Уведомить пользователя
+    try:
+        await context.bot.send_message(
+            chat_id=a['user_id'],
+            text=(
+                f"❌ <b>Обжалование было отклонено</b>\n\n"
+                f"📝 Причина: {reject_reason}\n"
+                f"👤 Отклонил: <b>{handler_role_name}</b>"
+            ),
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        logger.error(f"Ошибка уведомления об отклонении: {e}")
+
+    await update.message.reply_text(
+        f"✅ Заявка <b>#{appeal_id}</b> отклонена. Пользователь уведомлён.",
+        parse_mode='HTML'
+    )
+    return True
 
 
 def main():
@@ -2883,6 +3094,10 @@ def main():
     application.add_handler(CallbackQueryHandler(obn_work_callback, pattern='^obn_work_'))
     application.add_handler(CallbackQueryHandler(back_to_start_callback, pattern='^back_to_start$'))
     application.add_handler(CallbackQueryHandler(obn_back_callback, pattern='^obn_back$'))
+    application.add_handler(CallbackQueryHandler(appeal_skip_text_callback, pattern='^appeal_skip_text$'))
+    application.add_handler(CallbackQueryHandler(appeal_skip_photo_callback, pattern='^appeal_skip_photo$'))
+    application.add_handler(CallbackQueryHandler(obn_approve_callback, pattern='^obn_approve_'))
+    application.add_handler(CallbackQueryHandler(obn_reject_callback, pattern='^obn_reject_'))
     application.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, handle_private_message))
     application.add_handler(CallbackQueryHandler(handle_button_callback))
 

@@ -3071,7 +3071,7 @@ def main():
     application = Application.builder().token(BOT_TOKEN).build()
 
     application.add_handler(MessageHandler(filters.PHOTO & filters.ChatType.SUPERGROUP, handle_report))
-    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_main_chat_message))
+    application.add_handler(MessageHandler(filters.ChatType.SUPERGROUP & ~filters.COMMAND, handle_main_chat_message))
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("vg", warning_command))

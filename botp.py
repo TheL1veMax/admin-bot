@@ -67,20 +67,20 @@ USERS_ROLES = {
     'whysparky': Role.СЗМ,
     'maga8c': Role.АДМИН,
     'qwertyuiopasdfghjklzxcvbnm123411': Role.КУРАТОР,
-    'anayka_lol': Role.МЛ_АДМИН,
-    'matnozdra': Role.МЛ_АДМИН,
+    'admin1': Role.МЛ_АДМИН,
+    'admin2': Role.МЛ_АДМИН,
     'stmoder': Role.СТАРШИЙ_МОДЕРАТОР,
-    'miwa123009': Role.СТАРШИЙ_МОДЕРАТОР,
-    'breakbrosmiling': Role.СТАРШИЙ_МОДЕРАТОР,
-    'unbesiegbar_s': Role.МОДЕРАТОР,
+    'stmoder2': Role.СТАРШИЙ_МОДЕРАТОР,
+    'stmoder3': Role.СТАРШИЙ_МОДЕРАТОР,
+    'noob_126': Role.МОДЕРАТОР,
     'grechka_aw': Role.МОДЕРАТОР,
-    'spl1ntexxx': Role.МОДЕРАТОР,
-    'svezhiy_vozdyx': Role.МОДЕРАТОР,
-    'murmes': Role.МОДЕРАТОР,
-    'sportaisam': Role.МОДЕРАТОР,
-    'rusich_group35': Role.МОДЕРАТОР,
+    'favoritgg6': Role.МОДЕРАТОР,
+    'Riykaa_bro': Role.МОДЕРАТОР,
+    'matnozdra': Role.МОДЕРАТОР,
+    'moder': Role.МОДЕРАТОР,
+    'moder': Role.МОДЕРАТОР,
     'qwelex_z': Role.МОДЕРАТОР,
-    's1mka2': Role.МОДЕРАТОР
+    'moder': Role.МОДЕРАТОР
 }
 
 reports_data = {}

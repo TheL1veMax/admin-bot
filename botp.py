@@ -580,6 +580,10 @@ def get_checkers_usernames(category: str):
                 if Role.СТАРШИЙ_АДМИН <= role < Role.ГЛАВНЫЙ_АДМИН]
     return []
 
+def can_handle_appeal(user_role):
+    """ТС и СЗА+ могут рассматривать обжалования"""
+    return user_role is not None and user_role >= Role.ТС
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
     user_display_name = get_display_name(user)
@@ -628,14 +632,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ])
 
-    await update.message.reply_text(message_text, reply_markup=keyboard)
+    await update.message.reply_text(message_text)
 
-    # Второе сообщение — статус
+    # Второе сообщение — статус + кнопки
     status_text = (
         f"👤 Ваша роль в чате: <b>{role_display}</b>\n"
         f"⚖️ Ограничения: <b>{restrictions_text}</b>"
     )
-    await update.message.reply_text(status_text, parse_mode='HTML')
+    await update.message.reply_text(status_text, parse_mode='HTML', reply_markup=keyboard)
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message

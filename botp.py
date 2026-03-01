@@ -47,8 +47,9 @@ stats_cooldowns = {}
 pending_punishments = {}
 
 class Role(IntEnum):
-    ГЛАВНЫЙ_АДМИН = 9
-    СЗА = 8
+    ГЛАВНЫЙ_АДМИН = 10
+    СЗА = 9
+    ТС = 8
     ЗАМ_ГЛАВНОГО = 7
     КУРАТОР = 6
     СТАРШИЙ_АДМИН = 5
@@ -61,26 +62,27 @@ class Role(IntEnum):
 USERS_ROLES = {
     'glavnyy_admin': Role.ГЛАВНЫЙ_АДМИН,
     'gerrinetwork': Role.СЗА,
+    # 'username_тс': Role.ТС,  # <- добавь сюда ТС пользователей
     'the_pr1estesss': Role.ЗАМ_ГЛАВНОГО,
     'qwertyuiopasdfghjklzxcvbnm123411': Role.СТАРШИЙ_АДМИН,
     'mskmboky': Role.СТАРШИЙ_АДМИН,
     'whysparky': Role.СЗМ,
     'maga8c': Role.АДМИН,
     'qwertyuiopasdfghjklzxcvbnm123411': Role.КУРАТОР,
-    'admin1': Role.МЛ_АДМИН,
-    'admin2': Role.МЛ_АДМИН,
+    'anayka_lol': Role.МЛ_АДМИН,
+    'matnozdra': Role.МЛ_АДМИН,
     'stmoder': Role.СТАРШИЙ_МОДЕРАТОР,
-    'stmoder2': Role.СТАРШИЙ_МОДЕРАТОР,
-    'stmoder3': Role.СТАРШИЙ_МОДЕРАТОР,
-    'noob_126': Role.МОДЕРАТОР,
+    'miwa123009': Role.СТАРШИЙ_МОДЕРАТОР,
+    'breakbrosmiling': Role.СТАРШИЙ_МОДЕРАТОР,
+    'unbesiegbar_s': Role.МОДЕРАТОР,
     'grechka_aw': Role.МОДЕРАТОР,
-    'favoritgg6': Role.МОДЕРАТОР,
-    'Riykaa_bro': Role.МОДЕРАТОР,
-    'matnozdra': Role.МОДЕРАТОР,
-    'moder': Role.МОДЕРАТОР,
-    'moder': Role.МОДЕРАТОР,
+    'spl1ntexxx': Role.МОДЕРАТОР,
+    'svezhiy_vozdyx': Role.МОДЕРАТОР,
+    'murmes': Role.МОДЕРАТОР,
+    'sportaisam': Role.МОДЕРАТОР,
+    'rusich_group35': Role.МОДЕРАТОР,
     'qwelex_z': Role.МОДЕРАТОР,
-    'moder': Role.МОДЕРАТОР
+    's1mka2': Role.МОДЕРАТОР
 }
 
 reports_data = {}
@@ -481,6 +483,7 @@ def get_user_role_name(username: str) -> str:
     role_names = {
         Role.ГЛАВНЫЙ_АДМИН: "Главный Админ",
         Role.СЗА: "СЗА",
+        Role.ТС: "Технический Специалист",
         Role.ЗАМ_ГЛАВНОГО: "Зам. Главного",
         Role.СТАРШИЙ_АДМИН: "Старший Админ",
         Role.КУРАТОР: "Куратор",
@@ -513,7 +516,7 @@ def get_user_role(username: str):
 def can_check_report(checker_role, report_type: str):
     if checker_role is None:
         return False
-    if checker_role >= Role.СЗА:
+    if checker_role >= Role.ТС:
         return True
     if checker_role >= Role.СТАРШИЙ_АДМИН:
         return True
@@ -584,9 +587,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_role = get_user_role(user.username)
     role_name = user_role.name if user_role is not None else "Не назначена"
 
+    # Формируем отображаемое название роли
+    role_display = get_user_role_name(user.username) if user_role is not None else "Участник"
+
+    # Проверяем есть ли активные наказания
+    active_punishments = get_user_active_punishments(user.id)
+    has_restrictions = len(active_punishments) > 0
+    restrictions_text = "⛔️ Есть" if has_restrictions else "✅ Нет"
+
+    extra_commands = ""
+    if user_role is not None and can_handle_appeal(user_role):
+        extra_commands = "\n/obn - список заявок на обжалование (ТС/СЗА+)"
+
     message_text = (
         "✅ Бот для проверки отчетов модерации запущен!\n\n"
-        f"👤 Ваша роль: {role_name}\n\n"
+        f"👤 Ваша роль: {role_display}\n\n"
         "📋 Отправляйте отчеты в соответствующую тему:\n"
         "• Модераторы и ст.модераторы → Отчетность модерации\n"
         "• Мл.админы, админы, СЗМ → Отчетность администрации\n"
@@ -602,8 +617,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/ubl - убрать из черного списка (СЗМ+)\n"
         "/sp - сбросить принятые отчеты (СЗМ+)\n"
         "/so - сбросить отклоненные отчеты (СЗМ+)"
+        f"{extra_commands}"
     )
-    await update.message.reply_text(message_text)
+
+    # Кнопки для всех пользователей
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📋 Обжалование наказания", callback_data="appeal_start"),
+            InlineKeyboardButton("📜 История наказаний", callback_data="my_history")
+        ]
+    ])
+
+    await update.message.reply_text(message_text, reply_markup=keyboard)
+
+    # Второе сообщение — статус
+    status_text = (
+        f"👤 Ваша роль в чате: <b>{role_display}</b>\n"
+        f"⚖️ Ограничения: <b>{restrictions_text}</b>"
+    )
+    await update.message.reply_text(status_text, parse_mode='HTML')
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
@@ -2298,6 +2330,515 @@ async def handle_main_chat_message(update: Update, context: ContextTypes.DEFAULT
     except Exception as e:
         logger.error(f"❌ {e}", exc_info=True)
 
+
+# ==================== ОБЖАЛОВАНИЯ ====================
+
+# Хранилище активных заявок на обжалование
+# appeal_id -> {user_id, username, full_name, punishment_id, punishment_type, duration, rule,
+#               issued_by_username, reason, text, photo_file_id, status, created_at, handler_id}
+active_appeals = {}
+appeal_counter = [0]
+
+# Временные данные при создании обжалования
+appeal_states = {}
+# user_id -> {step, punishment_id, reason, text, photo_file_id}
+
+
+def get_user_active_punishments(user_id: int):
+    """Получить активные наказания пользователя (последние 30 дней)"""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT id, punishment_type, duration, rule, issued_by_username,
+                           approved_by_username, created_at
+                    FROM punishments
+                    WHERE user_id = %s
+                    AND created_at > NOW() - INTERVAL '30 days'
+                    ORDER BY created_at DESC
+                """, (user_id,))
+                return cur.fetchall()
+    except Exception as e:
+        logger.error(f"Get active punishments error: {e}")
+        return []
+
+
+def get_all_user_punishments(user_id: int):
+    """Все наказания пользователя"""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT id, punishment_type, duration, rule, issued_by_username,
+                           approved_by_username, created_at
+                    FROM punishments
+                    WHERE user_id = %s
+                    ORDER BY created_at DESC
+                    LIMIT 20
+                """, (user_id,))
+                return cur.fetchall()
+    except Exception as e:
+        logger.error(f"Get all punishments error: {e}")
+        return []
+
+
+def get_punishment_by_id(punishment_id: int):
+    """Получить наказание по ID"""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT id, user_id, username, full_name, punishment_type, duration, rule,
+                           issued_by_username, approved_by_username, created_at
+                    FROM punishments WHERE id = %s
+                """, (punishment_id,))
+                return cur.fetchone()
+    except Exception as e:
+        logger.error(f"Get punishment by id error: {e}")
+        return None
+
+
+APPEAL_REASONS = [
+    ("Ошибочное наказание", "appeal_reason_0"),
+    ("Наказание не соответствует правилам", "appeal_reason_1"),
+    ("Нарушение процедуры выдачи наказания", "appeal_reason_2"),
+    ("Предвзятость со стороны администратора", "appeal_reason_3"),
+    ("Отсутствие доказательной базы", "appeal_reason_4"),
+]
+
+PUN_TYPE_NAME = {'mute': '🔇 Мут', 'ban': '🔒 Бан', 'warn': '⚠️ Варн'}
+DUR_TEXT = {
+    '1h': '1 час', '2h': '2 часа', '6h': '6 часов', '12h': '12 часов',
+    '1d': '1 день', '3d': '3 дня', '7d': '7 дней', '30d': '30 дней',
+    'forever': 'навсегда', 'once': 'разово'
+}
+
+SZA_USERNAME = 'gerrinetwork'
+
+
+# ---- Обработчик кнопки "История наказаний" из /start ----
+async def my_history_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+
+    punishments = get_all_user_punishments(user.id)
+    if not punishments:
+        await query.message.reply_text("✅ У вас нет наказаний в истории.")
+        return
+
+    text = "📜 <b>Ваша история наказаний:</b>\n\nВыберите наказание для просмотра:"
+    buttons = []
+    for p in punishments:
+        ptype = PUN_TYPE_NAME.get(p['punishment_type'], p['punishment_type'])
+        dur = DUR_TEXT.get(p['duration'], p['duration'])
+        date_str = p['created_at'].strftime('%d.%m.%Y')
+        label = f"{ptype} {dur} — {date_str}"
+        buttons.append([InlineKeyboardButton(label, callback_data=f"view_pun_{p['id']}")])
+
+    buttons.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_start")])
+    await query.message.reply_text(text, parse_mode='HTML', reply_markup=InlineKeyboardMarkup(buttons))
+
+
+# ---- Просмотр конкретного наказания ----
+async def view_punishment_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+
+    pun_id = int(query.data.replace("view_pun_", ""))
+    p = get_punishment_by_id(pun_id)
+
+    if not p or p['user_id'] != user.id:
+        await query.answer("❌ Наказание не найдено", show_alert=True)
+        return
+
+    ptype = PUN_TYPE_NAME.get(p['punishment_type'], p['punishment_type'])
+    dur = DUR_TEXT.get(p['duration'], p['duration'])
+    date_str = p['created_at'].strftime('%d.%m.%Y %H:%M')
+
+    # Показываем юзернейм только СЗА
+    viewer_role = get_user_role(user.username)
+    if viewer_role is not None and viewer_role >= Role.СЗА:
+        issuer_text = f"@{p['issued_by_username']}"
+    else:
+        issuer_role_name = get_user_role_name(p['issued_by_username'])
+        issuer_text = issuer_role_name
+
+    text = (
+        f"📋 <b>Наказание #{p['id']}</b>\n\n"
+        f"🔹 Тип: {ptype}\n"
+        f"⏱ Срок: {dur}\n"
+        f"📝 Правило: {p['rule']}\n"
+        f"👮 Выдал: {issuer_text}\n"
+        f"📅 Дата: {date_str}"
+    )
+
+    buttons = [
+        [InlineKeyboardButton("⚖️ Обжаловать наказание", callback_data=f"appeal_pun_{pun_id}")],
+        [InlineKeyboardButton("🔙 Назад", callback_data="my_history")]
+    ]
+    await query.message.reply_text(text, parse_mode='HTML', reply_markup=InlineKeyboardMarkup(buttons))
+
+
+# ---- Начало обжалования конкретного наказания ----
+async def appeal_start_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+
+    if query.data == "appeal_start":
+        # Из главного меню — показать список активных наказаний
+        punishments = get_user_active_punishments(user.id)
+        if not punishments:
+            await query.message.reply_text("✅ У вас нет активных наказаний для обжалования.")
+            return
+        text = "⚖️ <b>Выберите наказание для обжалования:</b>"
+        buttons = []
+        for p in punishments:
+            ptype = PUN_TYPE_NAME.get(p['punishment_type'], p['punishment_type'])
+            dur = DUR_TEXT.get(p['duration'], p['duration'])
+            date_str = p['created_at'].strftime('%d.%m.%Y')
+            label = f"{ptype} {dur} — {date_str}"
+            buttons.append([InlineKeyboardButton(label, callback_data=f"appeal_pun_{p['id']}")])
+        buttons.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_start")])
+        await query.message.reply_text(text, parse_mode='HTML', reply_markup=InlineKeyboardMarkup(buttons))
+        return
+
+    # appeal_pun_{id}
+    pun_id = int(query.data.replace("appeal_pun_", ""))
+    p = get_punishment_by_id(pun_id)
+    if not p or p['user_id'] != user.id:
+        await query.answer("❌ Наказание не найдено", show_alert=True)
+        return
+
+    # Начинаем процесс обжалования
+    appeal_states[user.id] = {'step': 'reason', 'punishment_id': pun_id}
+
+    text = "⚖️ <b>Обжалование наказания</b>\n\nВыберите причину обжалования:"
+    buttons = [[InlineKeyboardButton(reason, callback_data=cb)] for reason, cb in APPEAL_REASONS]
+    buttons.append([InlineKeyboardButton("❌ Отмена", callback_data="appeal_cancel")])
+    await query.message.reply_text(text, parse_mode='HTML', reply_markup=InlineKeyboardMarkup(buttons))
+
+
+# ---- Выбор причины обжалования ----
+async def appeal_reason_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+
+    if user.id not in appeal_states:
+        await query.answer("❌ Сессия устарела", show_alert=True)
+        return
+
+    reason_idx = int(query.data.replace("appeal_reason_", ""))
+    reason_text = APPEAL_REASONS[reason_idx][0]
+    appeal_states[user.id]['reason'] = reason_text
+    appeal_states[user.id]['step'] = 'text'
+
+    await query.message.reply_text(
+        f"✅ Причина: <b>{reason_text}</b>\n\n"
+        "✍️ Напишите подробное описание вашей ситуации (или отправьте /skip чтобы пропустить):",
+        parse_mode='HTML'
+    )
+
+
+# ---- Получение текста обжалования ----
+async def handle_appeal_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.message.from_user
+
+    if user.id not in appeal_states or appeal_states[user.id].get('step') != 'text':
+        return False  # не наше сообщение
+
+    if update.message.text == '/skip':
+        appeal_states[user.id]['text'] = None
+    else:
+        appeal_states[user.id]['text'] = update.message.text
+
+    appeal_states[user.id]['step'] = 'photo'
+
+    await update.message.reply_text(
+        "📎 Прикрепите скриншот/фото как доказательство (или отправьте /skip чтобы пропустить):"
+    )
+    return True
+
+
+# ---- Получение фото обжалования ----
+async def handle_appeal_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.message.from_user
+
+    if user.id not in appeal_states or appeal_states[user.id].get('step') != 'photo':
+        return False
+
+    if update.message.photo:
+        appeal_states[user.id]['photo_file_id'] = update.message.photo[-1].file_id
+    else:
+        appeal_states[user.id]['photo_file_id'] = None
+
+    await submit_appeal(update, context, user)
+    return True
+
+
+async def handle_appeal_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.message.from_user
+    if user.id not in appeal_states:
+        return False
+
+    step = appeal_states[user.id].get('step')
+    if step == 'text':
+        appeal_states[user.id]['text'] = None
+        appeal_states[user.id]['step'] = 'photo'
+        await update.message.reply_text("📎 Прикрепите скриншот/фото или /skip:")
+        return True
+    elif step == 'photo':
+        appeal_states[user.id]['photo_file_id'] = None
+        await submit_appeal(update, context, user)
+        return True
+    return False
+
+
+async def submit_appeal(update, context, user):
+    """Финальная отправка заявки"""
+    state = appeal_states.pop(user.id, {})
+    pun_id = state.get('punishment_id')
+    p = get_punishment_by_id(pun_id)
+
+    if not p:
+        await update.message.reply_text("❌ Ошибка: наказание не найдено.")
+        return
+
+    appeal_counter[0] += 1
+    appeal_id = appeal_counter[0]
+
+    active_appeals[appeal_id] = {
+        'appeal_id': appeal_id,
+        'user_id': user.id,
+        'username': user.username,
+        'full_name': get_display_name(user),
+        'punishment_id': pun_id,
+        'punishment_type': p['punishment_type'],
+        'duration': p['duration'],
+        'rule': p['rule'],
+        'issued_by_username': p['issued_by_username'],
+        'reason': state.get('reason', 'Не указана'),
+        'text': state.get('text'),
+        'photo_file_id': state.get('photo_file_id'),
+        'status': 'pending',
+        'created_at': datetime.now(MSK),
+        'handler_id': None
+    }
+
+    await update.message.reply_text(
+        "✅ <b>Заявка на обжалование отправлена!</b>\n\n"
+        f"🆔 Номер заявки: <b>#{appeal_id}</b>\n"
+        "⏳ Ожидайте рассмотрения Техническим Специалистом или СЗА.",
+        parse_mode='HTML'
+    )
+
+
+# ---- Команда /obn для ТС и СЗА ----
+async def obn_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.chat.type != 'private':
+        await update.message.reply_text("❌ Только в ЛС с ботом!")
+        return
+
+    user = update.message.from_user
+    user_role = get_user_role(user.username)
+
+    if not can_handle_appeal(user_role):
+        await update.message.reply_text("❌ Нет доступа! (только ТС и СЗА+)")
+        return
+
+    pending = {aid: a for aid, a in active_appeals.items() if a['status'] == 'pending'}
+
+    if not pending:
+        await update.message.reply_text("📭 Нет активных заявок на обжалование.")
+        return
+
+    text = f"📋 <b>Активные заявки на обжалование ({len(pending)}):</b>\n\nВыберите заявку:"
+    buttons = []
+    for aid, a in pending.items():
+        ptype = PUN_TYPE_NAME.get(a['punishment_type'], a['punishment_type'])
+        dur = DUR_TEXT.get(a['duration'], a['duration'])
+        uname = f"@{a['username']}" if a['username'] else a['full_name']
+        label = f"#{aid} {uname} — {ptype} {dur}"
+        buttons.append([InlineKeyboardButton(label, callback_data=f"obn_view_{aid}")])
+
+    await update.message.reply_text(text, parse_mode='HTML', reply_markup=InlineKeyboardMarkup(buttons))
+
+
+# ---- Просмотр заявки ТС/СЗА ----
+async def obn_view_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+    user_role = get_user_role(user.username)
+
+    if not can_handle_appeal(user_role):
+        await query.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    appeal_id = int(query.data.replace("obn_view_", ""))
+    a = active_appeals.get(appeal_id)
+
+    if not a:
+        await query.answer("❌ Заявка не найдена", show_alert=True)
+        return
+
+    ptype = PUN_TYPE_NAME.get(a['punishment_type'], a['punishment_type'])
+    dur = DUR_TEXT.get(a['duration'], a['duration'])
+    uname = f"@{a['username']}" if a['username'] else a['full_name']
+    issuer_role_name = get_user_role_name(a['issued_by_username'])
+
+    text = (
+        f"📋 <b>Заявка на обжалование #{appeal_id}</b>\n\n"
+        f"👤 Пользователь: {uname}\n"
+        f"🔹 Наказание: {ptype}\n"
+        f"⏱ Срок: {dur}\n"
+        f"📝 Правило: {a['rule']}\n"
+        f"👮 Выдал: @{a['issued_by_username']} ({issuer_role_name})\n"
+        f"⚖️ Причина обжалования: {a['reason']}\n"
+        f"📅 Подана: {a['created_at'].strftime('%d.%m.%Y %H:%M')}"
+    )
+
+    buttons = [
+        [InlineKeyboardButton("🔍 Начать работу", callback_data=f"obn_work_{appeal_id}")],
+        [InlineKeyboardButton("🔙 Назад", callback_data="obn_back")]
+    ]
+    await query.message.reply_text(text, parse_mode='HTML', reply_markup=InlineKeyboardMarkup(buttons))
+
+
+# ---- Начать работу с заявкой ----
+async def obn_work_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+    user_role = get_user_role(user.username)
+
+    if not can_handle_appeal(user_role):
+        await query.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    appeal_id = int(query.data.replace("obn_work_", ""))
+    a = active_appeals.get(appeal_id)
+
+    if not a:
+        await query.answer("❌ Заявка не найдена", show_alert=True)
+        return
+
+    a['status'] = 'in_progress'
+    a['handler_id'] = user.id
+
+    # Показываем детали + фото + текст
+    details_text = (
+        f"🔍 <b>Рассмотрение заявки #{appeal_id}</b>\n\n"
+        f"👤 Пользователь: @{a['username']}\n"
+        f"💬 Описание от пользователя:\n"
+        f"{a['text'] or '<i>Не указано</i>'}"
+    )
+
+    if a.get('photo_file_id'):
+        await query.message.reply_photo(
+            photo=a['photo_file_id'],
+            caption=details_text,
+            parse_mode='HTML'
+        )
+    else:
+        await query.message.reply_text(details_text, parse_mode='HTML')
+
+    await query.message.reply_text(
+        f"✅ Заявка #{appeal_id} взята в работу.\n"
+        f"Для закрытия введите: /zk {appeal_id}"
+    )
+
+
+# ---- Команда /zk — закрыть заявку ----
+async def zk_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.chat.type != 'private':
+        await update.message.reply_text("❌ Только в ЛС с ботом!")
+        return
+
+    user = update.message.from_user
+    user_role = get_user_role(user.username)
+
+    if not can_handle_appeal(user_role):
+        await update.message.reply_text("❌ Нет доступа!")
+        return
+
+    if not context.args:
+        await update.message.reply_text("❌ Формат: /zk номер_заявки")
+        return
+
+    try:
+        appeal_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Укажите номер заявки числом")
+        return
+
+    a = active_appeals.get(appeal_id)
+    if not a:
+        await update.message.reply_text(f"❌ Заявка #{appeal_id} не найдена")
+        return
+
+    a['status'] = 'closed'
+    handler_role_name = get_user_role_name(user.username)
+
+    # Уведомление пользователю
+    try:
+        await context.bot.send_message(
+            chat_id=a['user_id'],
+            text=(
+                f"📋 <b>Заявка на обжалование #{appeal_id}</b>\n\n"
+                f"❌ Ваша заявка была закрыта.\n"
+                f"👤 Закрыл: <b>{handler_role_name}</b>"
+            ),
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        logger.error(f"Не удалось уведомить пользователя об закрытии заявки: {e}")
+
+    await update.message.reply_text(f"✅ Заявка #{appeal_id} закрыта. Пользователь уведомлён.")
+
+
+# ---- Кнопка "Назад к старту" ----
+async def back_to_start_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    # Просто просим написать /start снова
+    await query.message.reply_text("🏠 Нажмите /start чтобы вернуться в главное меню.")
+
+
+async def obn_back_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text("📋 Введите /obn чтобы посмотреть список заявок снова.")
+
+
+# ---- Общий обработчик сообщений в ЛС (для шагов обжалования) ----
+async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or update.message.chat.type != 'private':
+        return
+
+    user = update.message.from_user
+    if user.id not in appeal_states:
+        return
+
+    step = appeal_states[user.id].get('step')
+
+    if step == 'text':
+        if update.message.text and update.message.text.startswith('/skip'):
+            await handle_appeal_skip(update, context)
+        elif update.message.text:
+            await handle_appeal_text(update, context)
+    elif step == 'photo':
+        if update.message.text and update.message.text.startswith('/skip'):
+            await handle_appeal_skip(update, context)
+        elif update.message.photo:
+            await handle_appeal_photo(update, context)
+        else:
+            await update.message.reply_text("📎 Пожалуйста, отправьте фото или /skip")
+
+
 def main():
     if not DATABASE_URL:
         logger.error("❌ DATABASE_URL не задан!")
@@ -2328,6 +2869,17 @@ def main():
     application.add_handler(CommandHandler("history", history_command))
     application.add_handler(CallbackQueryHandler(history_pagination_callback, pattern='^history_(prev|next)_'))
     application.add_handler(CommandHandler("obv", announcement_command))
+    application.add_handler(CommandHandler("obn", obn_command))
+    application.add_handler(CommandHandler("zk", zk_command))
+    application.add_handler(CallbackQueryHandler(my_history_callback, pattern='^my_history$'))
+    application.add_handler(CallbackQueryHandler(view_punishment_callback, pattern='^view_pun_'))
+    application.add_handler(CallbackQueryHandler(appeal_start_callback, pattern='^appeal_(start|pun_)'))
+    application.add_handler(CallbackQueryHandler(appeal_reason_callback, pattern='^appeal_reason_'))
+    application.add_handler(CallbackQueryHandler(obn_view_callback, pattern='^obn_view_'))
+    application.add_handler(CallbackQueryHandler(obn_work_callback, pattern='^obn_work_'))
+    application.add_handler(CallbackQueryHandler(back_to_start_callback, pattern='^back_to_start$'))
+    application.add_handler(CallbackQueryHandler(obn_back_callback, pattern='^obn_back$'))
+    application.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, handle_private_message))
     application.add_handler(CallbackQueryHandler(handle_button_callback))
 
     logger.info("✅ Bot running with automatic punishments!")

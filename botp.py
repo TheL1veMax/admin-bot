@@ -3237,12 +3237,6 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             found_id, _ = find_user_id_by_username(target_username)
             if found_id:
                 target_user_id = found_id
-            else:
-                err = await message.reply_text(
-                    f"❌ @{target_username} не найден в базе!\n💡 Попросите написать /start боту")
-                asyncio.create_task(delete_messages_after_delay(
-                    context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
-                return
     elif message.reply_to_message:
         target_user = message.reply_to_message.from_user
         target_user_id = target_user.id
@@ -3364,12 +3358,6 @@ async def snwarn_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             found_id, _ = find_user_id_by_username(target_username)
             if found_id:
                 target_user_id = found_id
-            else:
-                err = await message.reply_text(
-                    f"❌ @{target_username} не найден в базе!\n💡 Попросите написать /start боту")
-                asyncio.create_task(delete_messages_after_delay(
-                    context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
-                return
     elif message.reply_to_message:
         target_user = message.reply_to_message.from_user
         target_user_id = target_user.id

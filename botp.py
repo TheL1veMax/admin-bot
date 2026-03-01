@@ -1733,9 +1733,9 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
 
         keyboard = [
             [InlineKeyboardButton("🔇 Мут", callback_data=f"punish_mute_{report_id}")],
-            [InlineKeyboardButton("⚠️ Предупреждение", callback_data=f"punish_warn_{report_id}")],
+            [InlineKeyboardButton("⚠️ Варн", callback_data=f"punish_warn_{report_id}")],
             [InlineKeyboardButton("🚫 Бан", callback_data=f"punish_ban_{report_id}")],
-            [InlineKeyboardButton("📝 Ручное наказание", callback_data=f"punish_manual_{report_id}")]
+            [InlineKeyboardButton("✋ Выдать вручную", callback_data=f"punish_manual_{report_id}")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -2121,7 +2121,7 @@ async def send_punishment_dm(context: ContextTypes.DEFAULT_TYPE, violator_id: in
     # Название наказания
     punishment_names = {
         'mute': 'Мут',
-        'warn': 'Предупреждение',
+        'warn': 'Варн',
         'ban': 'Бан'
     }
 
@@ -2298,7 +2298,7 @@ async def handle_appeal_callback(update: Update, context: ContextTypes.DEFAULT_T
     # Эмодзи для типов
     punishment_emoji = {
         'mute': '🔇 Мут',
-        'warn': '⚠️ Предупреждение',
+        'warn': '⚠️ Варн',
         'ban': '🚫 Бан'
     }
 

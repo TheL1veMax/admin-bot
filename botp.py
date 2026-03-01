@@ -2459,6 +2459,15 @@ APPEAL_REASONS = [
 
 PUN_TYPE_NAME = {'mute': '🔇 Мут', 'ban': '🔒 Бан', 'warn': '⚠️ Варн'}
 
+def fmt_dt(dt) -> str:
+    """Форматировать datetime в МСК с датой и временем"""
+    if dt is None:
+        return '—'
+    if dt.tzinfo is None:
+        from zoneinfo import ZoneInfo as _ZI
+        dt = dt.replace(tzinfo=_ZI('Europe/Moscow'))
+    return dt.strftime('%d.%m.%Y %H:%M')
+
 def format_punishment(ptype: str, duration: str) -> str:
     """Красивый формат наказания"""
     type_name = PUN_TYPE_NAME.get(ptype, ptype)
@@ -2490,8 +2499,7 @@ async def my_history_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     buttons = []
     for p in punishments:
         ptype = PUN_TYPE_NAME.get(p['punishment_type'], p['punishment_type'])
-        dur = DUR_TEXT.get(p['duration'], p['duration'])
-        date_str = p['created_at'].strftime('%d.%m.%Y')
+        date_str = fmt_dt(p['created_at'])
         label = f"{format_punishment(p['punishment_type'], p['duration'])} — {date_str}"
         buttons.append([InlineKeyboardButton(label, callback_data=f"view_pun_{p['id']}")])
 
@@ -2513,7 +2521,7 @@ async def view_punishment_callback(update: Update, context: ContextTypes.DEFAULT
         return
 
     pun_fmt = format_punishment(p['punishment_type'], p['duration'])
-    date_str = p['created_at'].strftime('%d.%m.%Y %H:%M')
+    date_str = fmt_dt(p['created_at'])
 
     # Показываем юзернейм только СЗА
     viewer_role = get_user_role(user.username)
@@ -2552,10 +2560,8 @@ async def appeal_start_callback(update: Update, context: ContextTypes.DEFAULT_TY
             return
         text = "⚖️ <b>Выберите наказание для обжалования:</b>"
         buttons = []
-        for p in punishments:
-            ptype = PUN_TYPE_NAME.get(p['punishment_type'], p['punishment_type'])
-            dur = DUR_TEXT.get(p['duration'], p['duration'])
-            date_str = p['created_at'].strftime('%d.%m.%Y')
+        for p in punishments[:1]:  # только последнее наказание
+            date_str = fmt_dt(p['created_at'])
             label = f"{format_punishment(p['punishment_type'], p['duration'])} — {date_str}"
             buttons.append([InlineKeyboardButton(label, callback_data=f"appeal_pun_{p['id']}")])
         buttons.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_start")])
@@ -2765,7 +2771,7 @@ async def obn_view_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📝 Правило: {a['rule']}\n"
         f"👮 Выдал: @{a['issued_by_username']} ({issuer_role_name})\n"
         f"⚖️ Причина обжалования: {a['reason']}\n"
-        f"📅 Подана: {a['created_at'].strftime('%d.%m.%Y %H:%M')}"
+        f"📅 Подана: {fmt_dt(a['created_at'])}"
     )
 
     buttons = [
@@ -3237,6 +3243,12 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             found_id, _ = find_user_id_by_username(target_username)
             if found_id:
                 target_user_id = found_id
+            else:
+                err = await message.reply_text(
+                    f"❌ @{target_username} не найден в базе!\n💡 Попросите написать /start боту")
+                asyncio.create_task(delete_messages_after_delay(
+                    context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
+                return
     elif message.reply_to_message:
         target_user = message.reply_to_message.from_user
         target_user_id = target_user.id
@@ -3310,7 +3322,7 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pun_lines = "\n\n📋 <b>Последние наказания:</b>"
         for p in recent_puns:
             pun_fmt = format_punishment(p['punishment_type'], p['duration'])
-            date_str = p['created_at'].strftime('%d.%m.%Y %H:%M')
+            date_str = fmt_dt(p['created_at'])
             pun_lines += f"\n• {pun_fmt} — {date_str}"
 
     info_text = (
@@ -3358,6 +3370,12 @@ async def snwarn_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             found_id, _ = find_user_id_by_username(target_username)
             if found_id:
                 target_user_id = found_id
+            else:
+                err = await message.reply_text(
+                    f"❌ @{target_username} не найден в базе!\n💡 Попросите написать /start боту")
+                asyncio.create_task(delete_messages_after_delay(
+                    context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
+                return
     elif message.reply_to_message:
         target_user = message.reply_to_message.from_user
         target_user_id = target_user.id

@@ -151,6 +151,18 @@ def init_database():
             """)
 
             cur.execute("""
+                CREATE TABLE IF NOT EXISTS appeal_counter_store (
+                    id INTEGER PRIMARY KEY DEFAULT 1,
+                    last_id INTEGER DEFAULT 0
+                )
+            """)
+            cur.execute("""
+                INSERT INTO appeal_counter_store (id, last_id)
+                VALUES (1, 0)
+                ON CONFLICT (id) DO NOTHING
+            """)
+
+            cur.execute("""
                 CREATE TABLE IF NOT EXISTS punishments (
                     id SERIAL PRIMARY KEY,
                     user_id BIGINT NOT NULL,
@@ -620,7 +632,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/bl - добавить в черный список (СЗМ+)\n"
         "/ubl - убрать из черного списка (СЗМ+)\n"
         "/sp - сбросить принятые отчеты (СЗМ+)\n"
-        "/so - сбросить отклоненные отчеты (СЗМ+)"
+        "/so - сбросить отклоненные отчеты (СЗМ+)\n"
+        "/info - информация о пользователе (Мл. Админ+)\n"
+        "/swarn - снять один варн (Мл. Админ+)"
         f"{extra_commands}"
     )
 
@@ -1255,12 +1269,13 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(parts) >= 4 and (parts[1].startswith('@') or parts[1].isdigit()):
         target_username = parts[1].lstrip('@')
 
+        days_str = parts[2].lower().rstrip('d').rstrip('д')
         try:
-            days = int(parts[2])
+            days = int(days_str)
             if days <= 0:
                 raise ValueError
         except ValueError:
-            error_msg = await message.reply_text("❌ Дни - положительное число!")
+            error_msg = await message.reply_text("❌ Укажите срок числом дней, например: 30d")
             asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
             return
 
@@ -1306,12 +1321,13 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
             return
 
+        days_str = parts[1].lower().rstrip('d').rstrip('д')
         try:
-            days = int(parts[1])
+            days = int(days_str)
             if days <= 0:
                 raise ValueError
         except ValueError:
-            error_msg = await message.reply_text("❌ Дни - положительное число!")
+            error_msg = await message.reply_text("❌ Укажите срок числом дней, например: 30d")
             asyncio.create_task(delete_messages_after_delay(context, message.chat.id, [message.message_id, error_msg.message_id], DELETE_AFTER_SECONDS))
             return
 
@@ -1325,12 +1341,20 @@ async def blacklist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_link = f"<a href='tg://user?id={target_user_id}'>{target_user_name}</a>"
     end_date = datetime.fromisoformat(entry['end_date'])
 
+    # Кикаем из группы администрации
+    try:
+        await context.bot.ban_chat_member(chat_id=ADMIN_GROUP_ID, user_id=target_user_id)
+        await context.bot.unban_chat_member(chat_id=ADMIN_GROUP_ID, user_id=target_user_id)
+    except Exception as e:
+        logger.error(f"Ошибка при кике из группы: {e}")
+
     bl_message = (
         f"🚫 <b>ЧЕРНЫЙ СПИСОК</b>\n\n"
         f"👤 {user_link}\n"
-        f"📝 {reason}\n"
-        f"⏱ {days} дн. ({end_date.strftime('%d.%m.%Y')})\n"
-        f"👨‍💼 {issuer.mention_html()}"
+        f"📝 Причина: {reason}\n"
+        f"⏱ Срок: {days} дн. (до {end_date.strftime('%d.%m.%Y')})\n"
+        f"👨‍💼 Добавил: {issuer.mention_html()}\n"
+        f"⚠️ Пользователь исключён из группы."
     )
 
     await context.bot.send_message(
@@ -2335,6 +2359,24 @@ async def handle_main_chat_message(update: Update, context: ContextTypes.DEFAULT
         logger.error(f"❌ {e}", exc_info=True)
 
 
+
+def get_next_appeal_id() -> int:
+    """Получить следующий ID обжалования из БД (сохраняется между перезапусками)"""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE appeal_counter_store
+                    SET last_id = last_id + 1
+                    WHERE id = 1
+                    RETURNING last_id
+                """)
+                return cur.fetchone()[0]
+    except Exception as e:
+        logger.error(f"get_next_appeal_id error: {e}")
+        appeal_counter[0] += 1
+        return appeal_counter[0]
+
 # ==================== ОБЖАЛОВАНИЯ ====================
 reject_states = {}
 
@@ -2412,6 +2454,14 @@ APPEAL_REASONS = [
 ]
 
 PUN_TYPE_NAME = {'mute': '🔇 Мут', 'ban': '🔒 Бан', 'warn': '⚠️ Варн'}
+
+def format_punishment(ptype: str, duration: str) -> str:
+    """Красивый формат наказания"""
+    type_name = PUN_TYPE_NAME.get(ptype, ptype)
+    if ptype == 'warn':
+        return type_name  # варн без длительности
+    dur_name = DUR_TEXT.get(duration, duration)
+    return f"{type_name} — {dur_name}" 
 DUR_TEXT = {
     '1h': '1 час', '2h': '2 часа', '6h': '6 часов', '12h': '12 часов',
     '1d': '1 день', '3d': '3 дня', '7d': '7 дней', '30d': '30 дней',
@@ -2438,7 +2488,7 @@ async def my_history_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         ptype = PUN_TYPE_NAME.get(p['punishment_type'], p['punishment_type'])
         dur = DUR_TEXT.get(p['duration'], p['duration'])
         date_str = p['created_at'].strftime('%d.%m.%Y')
-        label = f"{ptype} {dur} — {date_str}"
+        label = f"{format_punishment(p['punishment_type'], p['duration'])} — {date_str}"
         buttons.append([InlineKeyboardButton(label, callback_data=f"view_pun_{p['id']}")])
 
     buttons.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_start")])
@@ -2458,8 +2508,7 @@ async def view_punishment_callback(update: Update, context: ContextTypes.DEFAULT
         await query.answer("❌ Наказание не найдено", show_alert=True)
         return
 
-    ptype = PUN_TYPE_NAME.get(p['punishment_type'], p['punishment_type'])
-    dur = DUR_TEXT.get(p['duration'], p['duration'])
+    pun_fmt = format_punishment(p['punishment_type'], p['duration'])
     date_str = p['created_at'].strftime('%d.%m.%Y %H:%M')
 
     # Показываем юзернейм только СЗА
@@ -2472,8 +2521,7 @@ async def view_punishment_callback(update: Update, context: ContextTypes.DEFAULT
 
     text = (
         f"📋 <b>Наказание #{p['id']}</b>\n\n"
-        f"🔹 Тип: {ptype}\n"
-        f"⏱ Срок: {dur}\n"
+        f"🔹 Наказание: {pun_fmt}\n"
         f"📝 Правило: {p['rule']}\n"
         f"👮 Выдал: {issuer_text}\n"
         f"📅 Дата: {date_str}"
@@ -2504,7 +2552,7 @@ async def appeal_start_callback(update: Update, context: ContextTypes.DEFAULT_TY
             ptype = PUN_TYPE_NAME.get(p['punishment_type'], p['punishment_type'])
             dur = DUR_TEXT.get(p['duration'], p['duration'])
             date_str = p['created_at'].strftime('%d.%m.%Y')
-            label = f"{ptype} {dur} — {date_str}"
+            label = f"{format_punishment(p['punishment_type'], p['duration'])} — {date_str}"
             buttons.append([InlineKeyboardButton(label, callback_data=f"appeal_pun_{p['id']}")])
         buttons.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_start")])
         await query.message.reply_text(text, parse_mode='HTML', reply_markup=InlineKeyboardMarkup(buttons))
@@ -2623,8 +2671,7 @@ async def submit_appeal(update, context, user):
         await update.message.reply_text("❌ Ошибка: наказание не найдено.")
         return
 
-    appeal_counter[0] += 1
-    appeal_id = appeal_counter[0]
+    appeal_id = get_next_appeal_id()
 
     active_appeals[appeal_id] = {
         'appeal_id': appeal_id,
@@ -2703,16 +2750,14 @@ async def obn_view_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("❌ Заявка не найдена", show_alert=True)
         return
 
-    ptype = PUN_TYPE_NAME.get(a['punishment_type'], a['punishment_type'])
-    dur = DUR_TEXT.get(a['duration'], a['duration'])
+    pun_fmt = format_punishment(a['punishment_type'], a['duration'])
     uname = f"@{a['username']}" if a['username'] else a['full_name']
     issuer_role_name = get_user_role_name(a['issued_by_username'])
 
     text = (
         f"📋 <b>Заявка на обжалование #{appeal_id}</b>\n\n"
         f"👤 Пользователь: {uname}\n"
-        f"🔹 Наказание: {ptype}\n"
-        f"⏱ Срок: {dur}\n"
+        f"🔹 Наказание: {pun_fmt}\n"
         f"📝 Правило: {a['rule']}\n"
         f"👮 Выдал: @{a['issued_by_username']} ({issuer_role_name})\n"
         f"⚖️ Причина обжалования: {a['reason']}\n"
@@ -2915,8 +2960,7 @@ async def appeal_skip_photo_callback(update: Update, context: ContextTypes.DEFAU
         await query.message.reply_text("❌ Ошибка: наказание не найдено.")
         return
 
-    appeal_counter[0] += 1
-    appeal_id = appeal_counter[0]
+    appeal_id = get_next_appeal_id()
 
     active_appeals[appeal_id] = {
         'appeal_id': appeal_id,
@@ -2964,14 +3008,18 @@ async def obn_approve_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     a['status'] = 'approved'
     handler_role_name = get_user_role_name(user.username)
 
+    # Снимаем наказание
+    removed = remove_all_punishments_for_appeal(a['user_id'], a['punishment_type'])
+    removal_note = "\n🔓 Наказание снято." if removed else "\n⚠️ Не удалось снять наказание автоматически."
+
     # Уведомить пользователя
     try:
         await context.bot.send_message(
             chat_id=a['user_id'],
             text=(
                 f"✅ <b>Обжалование было одобрено</b>\n\n"
-                f"👤 Одобрил: <b>{handler_role_name}</b>\n"
-                f"🔓 Все ограничения сняты."
+                f"👤 Одобрил: <b>{handler_role_name}</b>"
+                f"{removal_note}"
             ),
             parse_mode='HTML'
         )
@@ -2979,7 +3027,7 @@ async def obn_approve_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.error(f"Ошибка уведомления об одобрении: {e}")
 
     await query.message.reply_text(
-        f"✅ Заявка <b>#{appeal_id}</b> одобрена. Пользователь уведомлён.",
+        f"✅ Заявка <b>#{appeal_id}</b> одобрена. Пользователь уведомлён.{removal_note}",
         parse_mode='HTML'
     )
 
@@ -3054,6 +3102,292 @@ async def handle_reject_reason(update: Update, context: ContextTypes.DEFAULT_TYP
     return True
 
 
+
+# ---- Вспомогательные функции для /info и /swarn ----
+
+def get_user_warn_count(user_id: int) -> int:
+    """Количество активных варнов"""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT COUNT(*) FROM warnings WHERE user_id = %s AND active = TRUE",
+                    (user_id,)
+                )
+                return cur.fetchone()[0]
+    except Exception as e:
+        logger.error(f"get_user_warn_count error: {e}")
+        return 0
+
+
+def get_user_blacklist_status(user_id: int):
+    """Активная запись в ЧС или None"""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT id, days, reason, issued_by, start_date, end_date
+                    FROM blacklist
+                    WHERE user_id = %s AND active = TRUE
+                    ORDER BY start_date DESC LIMIT 1
+                """, (user_id,))
+                return cur.fetchone()
+    except Exception as e:
+        logger.error(f"get_user_blacklist_status error: {e}")
+        return None
+
+
+def get_user_recent_punishments(user_id: int, limit: int = 5):
+    """Последние N наказаний из таблицы punishments"""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT punishment_type, duration, rule, issued_by_username, created_at
+                    FROM punishments
+                    WHERE user_id = %s
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                """, (user_id, limit))
+                return cur.fetchall()
+    except Exception as e:
+        logger.error(f"get_user_recent_punishments error: {e}")
+        return []
+
+
+def remove_one_warn(user_id: int):
+    """Снять один (самый старый активный) варн. Возвращает оставшееся кол-во или None при ошибке."""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id FROM warnings
+                    WHERE user_id = %s AND active = TRUE
+                    ORDER BY created_at ASC
+                    LIMIT 1
+                """, (user_id,))
+                result = cur.fetchone()
+                if not result:
+                    return -1  # нет варнов
+                cur.execute("UPDATE warnings SET active = FALSE WHERE id = %s", (result[0],))
+                cur.execute(
+                    "SELECT COUNT(*) FROM warnings WHERE user_id = %s AND active = TRUE",
+                    (user_id,)
+                )
+                return cur.fetchone()[0]
+    except Exception as e:
+        logger.error(f"remove_one_warn error: {e}")
+        return None
+
+
+def remove_all_punishments_for_appeal(user_id: int, punishment_type: str):
+    """Снять активное наказание при одобрении обжалования"""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                if punishment_type == 'warn':
+                    # Снимаем один самый последний варн
+                    cur.execute("""
+                        UPDATE warnings SET active = FALSE
+                        WHERE id = (
+                            SELECT id FROM warnings
+                            WHERE user_id = %s AND active = TRUE
+                            ORDER BY created_at DESC LIMIT 1
+                        )
+                    """, (user_id,))
+                elif punishment_type in ('ban', 'mute'):
+                    cur.execute("""
+                        UPDATE blacklist SET active = FALSE
+                        WHERE user_id = %s AND active = TRUE
+                    """, (user_id,))
+        return True
+    except Exception as e:
+        logger.error(f"remove_all_punishments_for_appeal error: {e}")
+        return False
+
+
+# ---- /info команда ----
+async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.message
+    issuer = message.from_user
+    issuer_role = get_user_role(issuer.username)
+
+    if issuer_role is None or issuer_role < Role.МЛ_АДМИН:
+        err = await message.reply_text("❌ Нет прав! (Мл. Админ+)")
+        asyncio.create_task(delete_messages_after_delay(
+            context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
+        return
+
+    target_user_id = None
+    target_username = None
+
+    text = message.text.strip()
+    parts = text.split(maxsplit=1)
+
+    if len(parts) >= 2:
+        arg = parts[1].lstrip('@')
+        if arg.isdigit():
+            target_user_id = int(arg)
+        else:
+            target_username = arg
+            found_id, _ = find_user_id_by_username(target_username)
+            if found_id:
+                target_user_id = found_id
+    elif message.reply_to_message:
+        target_user = message.reply_to_message.from_user
+        target_user_id = target_user.id
+        target_username = target_user.username
+
+    if not target_user_id:
+        err = await message.reply_text(
+            "❌ Укажите пользователя:\n/info @username или /info ID\nили ответьте на сообщение")
+        asyncio.create_task(delete_messages_after_delay(
+            context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
+        return
+
+    # Получаем данные
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT user_id, username, full_name FROM users WHERE user_id = %s",
+                    (target_user_id,)
+                )
+                user_row = cur.fetchone()
+    except Exception as e:
+        logger.error(f"info_command DB error: {e}")
+        user_row = None
+
+    if not user_row:
+        err = await message.reply_text("❌ Пользователь не найден в базе.")
+        asyncio.create_task(delete_messages_after_delay(
+            context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
+        return
+
+    uid = user_row['user_id']
+    uname = f"@{user_row['username']}" if user_row['username'] else user_row['full_name']
+    role_name = get_user_role_name(user_row['username']) if user_row['username'] else "Участник"
+
+    warn_count = get_user_warn_count(uid)
+    bl = get_user_blacklist_status(uid)
+    recent_puns = get_user_recent_punishments(uid, 3)
+
+    # ЧС статус (чёрный список администрации)
+    if bl:
+        end_dt = bl['end_date']
+        if end_dt:
+            now_msk = datetime.now(MSK)
+            # end_dt может быть без timezone
+            if end_dt.tzinfo is None:
+                from zoneinfo import ZoneInfo as _ZI
+                end_dt = end_dt.replace(tzinfo=_ZI('Europe/Moscow'))
+            days_left = (end_dt - now_msk).days
+            hours_left = int((end_dt - now_msk).total_seconds() // 3600)
+            if days_left > 0:
+                time_left = f"{days_left} дн."
+            elif hours_left > 0:
+                time_left = f"{hours_left} ч."
+            else:
+                time_left = "менее часа"
+            bl_text = (
+                f"⛔️ Да\n"
+                f"   📅 До: {end_dt.strftime('%d.%m.%Y')}\n"
+                f"   ⏳ Осталось: {time_left}\n"
+                f"   📝 Причина: {bl['reason'] or 'не указана'}"
+            )
+        else:
+            bl_text = f"⛔️ Да (бессрочно)\n   📝 Причина: {bl['reason'] or 'не указана'}"
+    else:
+        bl_text = "✅ Нет"
+
+    # Последние наказания
+    pun_lines = ""
+    if recent_puns:
+        pun_lines = "\n\n📋 <b>Последние наказания:</b>"
+        for p in recent_puns:
+            ptype = PUN_TYPE_NAME.get(p['punishment_type'], p['punishment_type'])
+            dur = DUR_TEXT.get(p['duration'], p['duration'])
+            date_str = p['created_at'].strftime('%d.%m.%Y')
+            pun_lines += f"\n• {ptype} {dur} — {date_str}"
+
+    info_text = (
+        f"👤 <b>Информация о пользователе</b>\n\n"
+        f"🆔 ID: <code>{uid}</code>\n"
+        f"👤 Юзер: {uname}\n"
+        f"🎖 Роль: {role_name}\n"
+        f"⚠️ Варны: <b>{warn_count}</b>\n"
+        f"🚫 ЧС Админки: {bl_text}"
+        f"{pun_lines}"
+    )
+
+    reply = await message.reply_text(info_text, parse_mode='HTML')
+    asyncio.create_task(delete_messages_after_delay(
+        context, message.chat.id, [message.message_id, reply.message_id], DELETE_AFTER_SECONDS * 3))
+
+
+# ---- /swarn команда ----
+async def swarn_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.message
+    if message.chat.id != ADMIN_GROUP_ID:
+        return
+
+    issuer = message.from_user
+    issuer_role = get_user_role(issuer.username)
+
+    if issuer_role is None or issuer_role < Role.МЛ_АДМИН:
+        err = await message.reply_text("❌ Нет прав! (Мл. Админ+)")
+        asyncio.create_task(delete_messages_after_delay(
+            context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
+        return
+
+    target_user_id = None
+    target_username = None
+
+    text = message.text.strip()
+    parts = text.split(maxsplit=1)
+
+    if len(parts) >= 2:
+        arg = parts[1].lstrip('@')
+        if arg.isdigit():
+            target_user_id = int(arg)
+        else:
+            target_username = arg
+            found_id, _ = find_user_id_by_username(target_username)
+            if found_id:
+                target_user_id = found_id
+    elif message.reply_to_message:
+        target_user = message.reply_to_message.from_user
+        target_user_id = target_user.id
+        target_username = target_user.username
+
+    if not target_user_id:
+        err = await message.reply_text(
+            "❌ Укажите пользователя:\n/swarn @username или ответьте на сообщение")
+        asyncio.create_task(delete_messages_after_delay(
+            context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
+        return
+
+    result = remove_one_warn(target_user_id)
+    display = f"@{target_username}" if target_username else f"ID {target_user_id}"
+
+    if result == -1:
+        err = await message.reply_text(f"ℹ️ У {display} нет активных варнов.")
+        asyncio.create_task(delete_messages_after_delay(
+            context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
+    elif result is None:
+        err = await message.reply_text("❌ Ошибка при снятии варна.")
+        asyncio.create_task(delete_messages_after_delay(
+            context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
+    else:
+        reply = await message.reply_text(
+            f"✅ Варн снят с {display}\n"
+            f"⚠️ Оставшихся варнов: <b>{result}</b>",
+            parse_mode='HTML'
+        )
+        asyncio.create_task(delete_messages_after_delay(
+            context, message.chat.id, [message.message_id, reply.message_id], DELETE_AFTER_SECONDS))
+
+
 def main():
     if not DATABASE_URL:
         logger.error("❌ DATABASE_URL не задан!")
@@ -3084,6 +3418,8 @@ def main():
     application.add_handler(CommandHandler("history", history_command))
     application.add_handler(CallbackQueryHandler(history_pagination_callback, pattern='^history_(prev|next)_'))
     application.add_handler(CommandHandler("obv", announcement_command))
+    application.add_handler(CommandHandler("info", info_command))
+    application.add_handler(CommandHandler("swarn", swarn_command))
     application.add_handler(CommandHandler("obn", obn_command))
     application.add_handler(CommandHandler("zk", zk_command))
     application.add_handler(CallbackQueryHandler(my_history_callback, pattern='^my_history$'))

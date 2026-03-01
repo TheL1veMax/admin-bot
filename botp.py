@@ -634,7 +634,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/sp - сбросить принятые отчеты (СЗМ+)\n"
         "/so - сбросить отклоненные отчеты (СЗМ+)\n"
         "/info - информация о пользователе (Мл. Админ+)\n"
-        "/swarn - снять один варн (Мл. Админ+)"
+        "/snwarn - снять один варн (Мл. Админ+)"
         f"{extra_commands}"
     )
 
@@ -2235,7 +2235,9 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
             await context.bot.ban_chat_member(chat_id=PUBLIC_CHAT_ID, user_id=violator_id, until_date=until_date)
 
         try:
-            await context.bot.send_message(chat_id=PUBLIC_CHAT_ID, text=notification, parse_mode='HTML')
+            pub_msg = await context.bot.send_message(chat_id=PUBLIC_CHAT_ID, text=notification, parse_mode='HTML')
+            asyncio.create_task(delete_messages_after_delay(
+                context, PUBLIC_CHAT_ID, [pub_msg.message_id], 120))
         except Exception as e:
             logger.error(f"Notification error: {e}")
 
@@ -3270,7 +3272,7 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     warn_count = get_user_warn_count(uid)
     bl = get_user_blacklist_status(uid)
-    recent_puns = get_user_recent_punishments(uid, 3)
+    recent_puns = get_user_recent_punishments(uid, 6)
 
     # ЧС статус (чёрный список администрации)
     if bl:
@@ -3305,10 +3307,9 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if recent_puns:
         pun_lines = "\n\n📋 <b>Последние наказания:</b>"
         for p in recent_puns:
-            ptype = PUN_TYPE_NAME.get(p['punishment_type'], p['punishment_type'])
-            dur = DUR_TEXT.get(p['duration'], p['duration'])
-            date_str = p['created_at'].strftime('%d.%m.%Y')
-            pun_lines += f"\n• {ptype} {dur} — {date_str}"
+            pun_fmt = format_punishment(p['punishment_type'], p['duration'])
+            date_str = p['created_at'].strftime('%d.%m.%Y %H:%M')
+            pun_lines += f"\n• {pun_fmt} — {date_str}"
 
     info_text = (
         f"👤 <b>Информация о пользователе</b>\n\n"
@@ -3322,11 +3323,11 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     reply = await message.reply_text(info_text, parse_mode='HTML')
     asyncio.create_task(delete_messages_after_delay(
-        context, message.chat.id, [message.message_id, reply.message_id], DELETE_AFTER_SECONDS * 3))
+        context, message.chat.id, [message.message_id, reply.message_id], 120))
 
 
 # ---- /swarn команда ----
-async def swarn_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def snwarn_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
     if message.chat.id != ADMIN_GROUP_ID:
         return
@@ -3362,7 +3363,7 @@ async def swarn_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not target_user_id:
         err = await message.reply_text(
-            "❌ Укажите пользователя:\n/swarn @username или ответьте на сообщение")
+            "❌ Укажите пользователя:\n/snwarn @username или ответьте на сообщение")
         asyncio.create_task(delete_messages_after_delay(
             context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
         return
@@ -3419,7 +3420,7 @@ def main():
     application.add_handler(CallbackQueryHandler(history_pagination_callback, pattern='^history_(prev|next)_'))
     application.add_handler(CommandHandler("obv", announcement_command))
     application.add_handler(CommandHandler("info", info_command))
-    application.add_handler(CommandHandler("swarn", swarn_command))
+    application.add_handler(CommandHandler("snwarn", snwarn_command))
     application.add_handler(CommandHandler("obn", obn_command))
     application.add_handler(CommandHandler("zk", zk_command))
     application.add_handler(CallbackQueryHandler(my_history_callback, pattern='^my_history$'))

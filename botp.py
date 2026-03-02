@@ -62,7 +62,7 @@ class Role(IntEnum):
 USERS_ROLES = {
     'glavnyy_admin': Role.ГЛАВНЫЙ_АДМИН,
     'gerrinetwork': Role.СЗА,
-    'modtgi': Role.ТС,  
+    'mskmboky': Role.ТС,  
     'the_pr1estesss': Role.ЗАМ_ГЛАВНОГО,
     'qwertyuiopasdfghjklzxcvbnm123411': Role.КУРАТОР,
     'stadm': Role.СТАРШИЙ_АДМИН,

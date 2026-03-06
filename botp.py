@@ -639,7 +639,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/sp - сбросить принятые отчеты (СЗМ+)\n"
         "/so - сбросить отклоненные отчеты (СЗМ+)\n"
         "/info - информация о пользователе (Мл. Админ+)\n"
-        "/snwarn - снять один варн (Мл. Админ+)"
+        "/snwarn - снять один варн (Мл. Админ+)\n"
+"/vp - выдать принятый отчёт вручную (СЗМ+)\n"
+"/svp - снять принятый отчёт вручную (СЗМ+)"
         f"{extra_commands}"
     )
 
@@ -2407,7 +2409,7 @@ appeal_states = {}
 
 
 def get_user_active_punishments(user_id: int):
-    """Получить активные наказания пользователя (последние 30 дней)"""
+    """Получить ДЕЙСТВУЮЩИЕ ограничения (мут/бан) пользователя"""
     try:
         with get_db_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -2416,7 +2418,18 @@ def get_user_active_punishments(user_id: int):
                            approved_by_username, created_at
                     FROM punishments
                     WHERE user_id = %s
-                    AND created_at > NOW() - INTERVAL '30 days'
+                    AND punishment_type IN ('mute', 'ban')
+                    AND (
+                        duration = 'forever'
+                        OR (duration = '1h'  AND created_at > NOW() - INTERVAL '1 hour')
+                        OR (duration = '2h'  AND created_at > NOW() - INTERVAL '2 hours')
+                        OR (duration = '6h'  AND created_at > NOW() - INTERVAL '6 hours')
+                        OR (duration = '12h' AND created_at > NOW() - INTERVAL '12 hours')
+                        OR (duration = '1d'  AND created_at > NOW() - INTERVAL '1 day')
+                        OR (duration = '3d'  AND created_at > NOW() - INTERVAL '3 days')
+                        OR (duration = '7d'  AND created_at > NOW() - INTERVAL '7 days')
+                        OR (duration = '30d' AND created_at > NOW() - INTERVAL '30 days')
+                    )
                     ORDER BY created_at DESC
                 """, (user_id,))
                 return cur.fetchall()
@@ -3420,6 +3433,221 @@ async def snwarn_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context, message.chat.id, [message.message_id, reply.message_id], DELETE_AFTER_SECONDS))
 
 
+async def vp_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Выдать принятый отчёт вручную (/vp)"""
+    message = update.message
+    if message.chat.id != ADMIN_GROUP_ID:
+        return
+
+    issuer = message.from_user
+    issuer_display_name = get_display_name(issuer)
+    register_user(issuer.id, issuer.username, issuer_display_name)
+    issuer_role = get_user_role(issuer.username)
+
+    if not can_reset_stats(issuer_role):
+        err = await message.reply_text("❌ Нет прав! (СЗМ+)")
+        asyncio.create_task(delete_messages_after_delay(
+            context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
+        return
+
+    target_user_id = None
+    target_user_name = None
+    target_username = None
+
+    text = message.text.strip()
+    parts = text.split(maxsplit=1)
+
+    if len(parts) >= 2 and (parts[1].startswith('@') or parts[1].replace('@', '').isdigit()):
+        target_username = parts[1].lstrip('@')
+        if message.entities:
+            for entity in message.entities:
+                if entity.type == "text_mention":
+                    target_user = entity.user
+                    if target_user.id != 1087968824:
+                        target_user_id = target_user.id
+                        target_user_name = get_display_name(target_user)
+                        target_username = target_user.username or str(target_user_id)
+                        register_user(target_user_id, target_user.username, target_user_name)
+                        break
+        if target_user_id is None:
+            found_id, _ = find_user_id_by_username(target_username)
+            if found_id:
+                target_user_id = found_id
+                target_user_name = f"@{target_username}"
+            else:
+                err = await message.reply_text(f"❌ @{target_username} не найден!")
+                asyncio.create_task(delete_messages_after_delay(
+                    context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
+                return
+    elif message.reply_to_message:
+        target_user = message.reply_to_message.from_user
+        if target_user.id == 1087968824:
+            err = await message.reply_text("❌ Нельзя для анонимного сообщения!")
+            asyncio.create_task(delete_messages_after_delay(
+                context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
+            return
+        target_user_id = target_user.id
+        target_user_name = get_display_name(target_user)
+        target_username = target_user.username or str(target_user_id)
+        register_user(target_user_id, target_user.username, target_user_name)
+    else:
+        err = await message.reply_text("❌ Формат: /vp @username")
+        asyncio.create_task(delete_messages_after_delay(
+            context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
+        return
+
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO report_stats (user_id, username, full_name, accepted, rejected)
+                    VALUES (%s, %s, %s, 1, 0)
+                    ON CONFLICT (user_id) DO UPDATE
+                    SET accepted = report_stats.accepted + 1,
+                        full_name = EXCLUDED.full_name
+                    RETURNING accepted
+                """, (target_user_id, target_username, target_user_name))
+                new_val = cur.fetchone()[0]
+    except Exception as e:
+        logger.error(f"VP command error: {e}")
+        err = await message.reply_text("❌ Ошибка базы данных!")
+        asyncio.create_task(delete_messages_after_delay(
+            context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
+        return
+
+    user_link = f"<a href='tg://user?id={target_user_id}'>{target_user_name}</a>"
+    success = await message.reply_text(
+        f"✅ Принятый отчёт выдан\n"
+        f"👤 {user_link}\n"
+        f"📊 Принятых: {new_val - 1} → {new_val}\n"
+        f"👨‍💼 Выдал: {issuer.mention_html()}",
+        parse_mode='HTML'
+    )
+    asyncio.create_task(delete_messages_after_delay(
+        context, message.chat.id, [message.message_id, success.message_id], PUNISHMENT_DELETE_SECONDS))
+
+    log_text = (
+        f"✅ ВЫДАН ПРИНЯТЫЙ ОТЧЁТ ВРУЧНУЮ\n\n"
+        f"👤 Кому: {target_user_name} (@{target_username})\n"
+        f"📊 Принятых теперь: {new_val}\n"
+        f"👨‍💼 Выдал: @{issuer.username} ({get_user_role_name(issuer.username)})\n"
+        f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
+    )
+    await send_log(context, log_text)
+
+
+async def svp_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Снять принятый отчёт вручную (/svp)"""
+    message = update.message
+    if message.chat.id != ADMIN_GROUP_ID:
+        return
+
+    issuer = message.from_user
+    issuer_display_name = get_display_name(issuer)
+    register_user(issuer.id, issuer.username, issuer_display_name)
+    issuer_role = get_user_role(issuer.username)
+
+    if not can_reset_stats(issuer_role):
+        err = await message.reply_text("❌ Нет прав! (СЗМ+)")
+        asyncio.create_task(delete_messages_after_delay(
+            context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
+        return
+
+    target_user_id = None
+    target_user_name = None
+    target_username = None
+
+    text = message.text.strip()
+    parts = text.split(maxsplit=1)
+
+    if len(parts) >= 2 and (parts[1].startswith('@') or parts[1].replace('@', '').isdigit()):
+        target_username = parts[1].lstrip('@')
+        if message.entities:
+            for entity in message.entities:
+                if entity.type == "text_mention":
+                    target_user = entity.user
+                    if target_user.id != 1087968824:
+                        target_user_id = target_user.id
+                        target_user_name = get_display_name(target_user)
+                        target_username = target_user.username or str(target_user_id)
+                        register_user(target_user_id, target_user.username, target_user_name)
+                        break
+        if target_user_id is None:
+            found_id, _ = find_user_id_by_username(target_username)
+            if found_id:
+                target_user_id = found_id
+                target_user_name = f"@{target_username}"
+            else:
+                err = await message.reply_text(f"❌ @{target_username} не найден!")
+                asyncio.create_task(delete_messages_after_delay(
+                    context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
+                return
+    elif message.reply_to_message:
+        target_user = message.reply_to_message.from_user
+        if target_user.id == 1087968824:
+            err = await message.reply_text("❌ Нельзя для анонимного сообщения!")
+            asyncio.create_task(delete_messages_after_delay(
+                context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
+            return
+        target_user_id = target_user.id
+        target_user_name = get_display_name(target_user)
+        target_username = target_user.username or str(target_user_id)
+        register_user(target_user_id, target_user.username, target_user_name)
+    else:
+        err = await message.reply_text("❌ Формат: /svp @username")
+        asyncio.create_task(delete_messages_after_delay(
+            context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
+        return
+
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT accepted FROM report_stats WHERE user_id = %s", (target_user_id,))
+                result = cur.fetchone()
+                if not result:
+                    err = await message.reply_text("❌ Пользователь не найден в статистике!")
+                    asyncio.create_task(delete_messages_after_delay(
+                        context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
+                    return
+                old_val = result[0]
+                if old_val <= 0:
+                    err = await message.reply_text("❌ Принятых отчётов уже 0, снять нельзя!")
+                    asyncio.create_task(delete_messages_after_delay(
+                        context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
+                    return
+                new_val = max(0, old_val - 1)
+                cur.execute(
+                    "UPDATE report_stats SET accepted = %s WHERE user_id = %s",
+                    (new_val, target_user_id))
+    except Exception as e:
+        logger.error(f"SVP command error: {e}")
+        err = await message.reply_text("❌ Ошибка базы данных!")
+        asyncio.create_task(delete_messages_after_delay(
+            context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
+        return
+
+    user_link = f"<a href='tg://user?id={target_user_id}'>{target_user_name}</a>"
+    success = await message.reply_text(
+        f"✅ Принятый отчёт снят\n"
+        f"👤 {user_link}\n"
+        f"📊 Принятых: {old_val} → {new_val}\n"
+        f"👨‍💼 Снял: {issuer.mention_html()}",
+        parse_mode='HTML'
+    )
+    asyncio.create_task(delete_messages_after_delay(
+        context, message.chat.id, [message.message_id, success.message_id], PUNISHMENT_DELETE_SECONDS))
+
+    log_text = (
+        f"➖ СНЯТ ПРИНЯТЫЙ ОТЧЁТ ВРУЧНУЮ\n\n"
+        f"👤 У кого: {target_user_name} (@{target_username})\n"
+        f"📊 Принятых: {old_val} → {new_val}\n"
+        f"👨‍💼 Снял: @{issuer.username} ({get_user_role_name(issuer.username)})\n"
+        f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
+    )
+    await send_log(context, log_text)
+
+
 def main():
     if not DATABASE_URL:
         logger.error("❌ DATABASE_URL не задан!")
@@ -3452,6 +3680,8 @@ def main():
     application.add_handler(CommandHandler("obv", announcement_command))
     application.add_handler(CommandHandler("info", info_command))
     application.add_handler(CommandHandler("snwarn", snwarn_command))
+    application.add_handler(CommandHandler("vp", vp_command))
+    application.add_handler(CommandHandler("svp", svp_command))
     application.add_handler(CommandHandler("obn", obn_command))
     application.add_handler(CommandHandler("zk", zk_command))
     application.add_handler(CallbackQueryHandler(my_history_callback, pattern='^my_history$'))
@@ -3474,23 +3704,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-    # Удаление из категории ОТЧЕТНОСТЬ
-    if query.message.message_thread_id in [MODERATOR_REPORT_TOPIC_ID, ADMIN_REPORT_TOPIC_ID]:
-        asyncio.create_task(
-            delete_messages_after_delay(
-                context,
-                query.message.chat.id,
-                [query.message.message_id],
-                120
-            )
-        )
-        logger.info(f"⏰ Принятый отчёт будет удалён через 2 мин")
-
-
-
-
-
-
-# ✅ ФИКС УВЕДОМЛЕНИЙ: PUBLIC_CHAT_ID удаление через 2 мин

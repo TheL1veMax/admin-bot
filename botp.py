@@ -62,7 +62,7 @@ class Role(IntEnum):
 USERS_ROLES = {
     'glavnyy_admin': Role.ГЛАВНЫЙ_АДМИН,
     'gerrinetwork': Role.СЗА,
-    'mskmboky': Role.ТС,  
+    'mskmboky': Role.ТС,
     'qwertyuiopasdfghjklzxcvbnm123411': Role.ЗАМ_ГЛАВНОГО,
     's1mka2': Role.КУРАТОР,
     'stadm': Role.СТАРШИЙ_АДМИН,
@@ -241,15 +241,17 @@ def parse_report_details(caption: str):
     recommendation = None
     rule = None
 
-    for i, line in enumerate(lines):
+    for line in lines:
         line = line.strip()
+        if not line:
+            continue
         if line.startswith('@') and violator is None:
             violator = line.lstrip('@')
         elif line.startswith('@') and violator and moderator is None:
             moderator = line.lstrip('@')
-        elif '/' in line or 'h' in line.lower() or 'д' in line.lower() or 'warn' in line.lower():
+        elif re.search(r'\b(\d+[hHчдd]|warn|mute|ban|forever|навсегда|мут|бан|варн)\b', line, re.IGNORECASE):
             recommendation = line
-        elif line and not line.startswith('@'):
+        elif line and not line.startswith('@') and rule is None:
             rule = line
 
     return {
@@ -1824,77 +1826,78 @@ async def handle_report_decision(update: Update, context: ContextTypes.DEFAULT_T
     )
     await send_log(context, log_text)
 
-    await query.edit_message_caption(
-        caption=query.message.caption + f"\n\n{status_emoji} {status_text} (@{checker.username})",
-        parse_mode='HTML'
+    try:
+        await query.edit_message_caption(
+            caption=query.message.caption + f"\n\n{status_emoji} {status_text} (@{checker.username})",
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        logger.warning(f"edit_message_caption failed: {e}")
+
+    # Всегда удаляем сообщения из отчётности и чистим данные
+    asyncio.create_task(
+        delete_messages_after_delay(context, ADMIN_GROUP_ID,
+                                    [report['user_message_id'], report['bot_message_id']],
+                                    DELETE_AFTER_SECONDS)
     )
+    del reports_data[report_key]
 
     if action == 'accept':
         parsed = parse_report_details(report['caption'])
 
-        if parsed['violator'] and parsed['rule']:
-            violator_username = parsed['violator']
-            violator_id, violator_name = find_user_id_by_username(violator_username)
+        violator_username = parsed.get('violator') or 'не_определён'
+        violator_id = None
+        violator_name = f"@{violator_username}"
+        rule = parsed.get('rule') or 'правило не указано'
+
+        if parsed.get('violator'):
+            violator_id, found_name = find_user_id_by_username(violator_username)
+            if found_name:
+                violator_name = found_name
             if not violator_id:
-                await context.bot.send_message(chat_id=LOG_CHANNEL_ID, text=f"⚠️ @{violator_username} НЕ НАЙДЕН В БАЗЕ", parse_mode='HTML')
-            if violator_id:
-                punishment_key = f"punishment_{report_id}"
-                pending_punishments[punishment_key] = {
-                    'violator_id': violator_id,
-                    'violator_username': parsed['violator'],
-                    'violator_name': violator_name or f"@{parsed['violator']}",
-                    'moderator_id': report['sender_id'],
-                    'moderator_username': report['sender_username'],
-                    'approver_id': checker.id,
-                    'approver_username': checker.username,
-                    'approver_role': checker_role,
-                    'rule': parsed['rule'],
-                    'recommendation': parsed['recommendation'] or '',
-                    'report_message_id': report.get('message_id'),
-                    'report_topic_id': report.get('topic_id')
-                }
-
-                keyboard = [
-                    [InlineKeyboardButton("🔇 Мут", callback_data=f"punish_mute_{report_id}")],
-                    [InlineKeyboardButton("⚠️ Варн", callback_data=f"punish_warn_{report_id}")],
-                    [InlineKeyboardButton("🚫 Бан", callback_data=f"punish_ban_{report_id}")],
-                    [InlineKeyboardButton("✋ Выдать вручную", callback_data=f"punish_manual_{report_id}")]
-                ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-
-                punishment_text = (
-                    f"⚖️ <b>Выберите наказание</b>\n\n"
-                    f"👤 Нарушитель: @{parsed['violator']}\n"
-                    f"📋 Правило: {parsed['rule']}\n"
-                    f"💡 Рекомендация: {parsed['recommendation'] or 'не указана'}"
+                await context.bot.send_message(
+                    chat_id=LOG_CHANNEL_ID,
+                    text=f"⚠️ @{violator_username} не найден в базе — выдать наказание вручную",
+                    parse_mode='HTML'
                 )
 
-                await query.message.reply_text(
-                    punishment_text,
-                    parse_mode='HTML',
-                    reply_markup=reply_markup
-                )
+        punishment_key = f"punishment_{report_id}"
+        pending_punishments[punishment_key] = {
+            'violator_id': violator_id or 0,
+            'violator_username': violator_username,
+            'violator_name': violator_name,
+            'moderator_id': report['sender_id'],
+            'moderator_username': report['sender_username'],
+            'approver_id': checker.id,
+            'approver_username': checker.username,
+            'approver_role': checker_role,
+            'rule': rule,
+            'recommendation': parsed.get('recommendation') or '',
+            'report_message_id': report.get('message_id'),
+            'report_topic_id': report.get('topic_id')
+        }
 
-    asyncio.create_task(
-        delete_messages_after_delay(context, ADMIN_GROUP_ID, 
-                                   [report['user_message_id'], report['bot_message_id']], 
-                                   DELETE_AFTER_SECONDS)
-    )
+        keyboard = [
+            [InlineKeyboardButton("🔇 Мут", callback_data=f"punish_mute_{report_id}")],
+            [InlineKeyboardButton("⚠️ Варн", callback_data=f"punish_warn_{report_id}")],
+            [InlineKeyboardButton("🚫 Бан", callback_data=f"punish_ban_{report_id}")],
+            [InlineKeyboardButton("✋ Выдать вручную", callback_data=f"punish_manual_{report_id}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
 
-    del reports_data[report_key]
-
-
-    # Удаление из категории ОТЧЕТНОСТЬ
-    if query.message.message_thread_id in [MODERATOR_REPORT_TOPIC_ID, ADMIN_REPORT_TOPIC_ID]:
-        asyncio.create_task(
-            delete_messages_after_delay(
-                context,
-                query.message.chat.id,
-                [query.message.message_id],
-                120
-            )
+        not_in_db = " ⚠️ (не в базе)" if not violator_id else ""
+        punishment_text = (
+            f"⚖️ <b>Выберите наказание</b>\n\n"
+            f"👤 Нарушитель: @{violator_username}{not_in_db}\n"
+            f"📋 Правило: {rule}\n"
+            f"💡 Рекомендация: {parsed.get('recommendation') or 'не указана'}"
         )
-        logger.info(f"⏰ Отклонённый отчёт будет удалён через 2 мин")
+
+        await query.message.reply_text(
+            punishment_text,
+            parse_mode='HTML',
+            reply_markup=reply_markup
+        )
 
 async def handle_punishment_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -2199,10 +2202,6 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
     report_message_id = punishment_data.get('report_message_id')
     report_topic_id = punishment_data.get('report_topic_id')
 
-    add_punishment(violator_id, violator_username, violator_name, punishment_type, duration, rule,
-                   punishment_data['moderator_id'], moderator_username,
-                   punishment_data['approver_id'], approver_username)
-
     emoji = {'mute': '🔇', 'warn': '⚠️', 'ban': '🔒'}
     name = {'mute': 'мут', 'warn': 'варн', 'ban': 'бан'}
     dur_text = {'1h': '1 час', '2h': '2 часа', '6h': '6 часов', '12h': '12 часов',
@@ -2220,67 +2219,76 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
     else:
         approver_display = approver_role_obj.name if approver_role_obj is not None else "Админ"
 
+    # Сохраняем в БД
+    if violator_id:
+        add_punishment(violator_id, violator_username, violator_name, punishment_type, duration, rule,
+                       punishment_data['moderator_id'], moderator_username,
+                       punishment_data['approver_id'], approver_username)
+
+    # Применяем наказание в Telegram (только если знаем ID)
+    action_error = None
+    if violator_id:
+        try:
+            if punishment_type == 'mute':
+                until_date = calculate_until_date(duration)
+                await context.bot.restrict_chat_member(
+                    chat_id=PUBLIC_CHAT_ID, user_id=violator_id,
+                    permissions=ChatPermissions(can_send_messages=False), until_date=until_date)
+            elif punishment_type == 'ban':
+                until_date = calculate_until_date(duration)
+                await context.bot.ban_chat_member(
+                    chat_id=PUBLIC_CHAT_ID, user_id=violator_id, until_date=until_date)
+            elif punishment_type == 'warn':
+                add_warning(violator_id, violator_name, violator_username, rule, moderator_username)
+        except Exception as e:
+            action_error = str(e)
+            logger.error(f"Punishment action error: {e}")
+    else:
+        action_error = "ID нарушителя не найден в базе"
+
+    # Уведомление в публичный чат — всегда
+    not_found_note = "\n⚠️ ID не найден — применить вручную" if action_error else ""
     notification = (
         f"{emoji[punishment_type]} @{violator_username} получил {name[punishment_type]}{duration_display}\n"
         f"📝 Правило: {rule}\n"
         f"🎖 Ранг: {moderator_display}\n"
         f"✅ Одобрил: {approver_display}"
+        f"{not_found_note}"
     )
-
     try:
-        if punishment_type == 'mute':
-            until_date = calculate_until_date(duration)
-            await context.bot.restrict_chat_member(
-                chat_id=PUBLIC_CHAT_ID, user_id=violator_id,
-                permissions=ChatPermissions(can_send_messages=False), until_date=until_date)
-        elif punishment_type == 'ban':
-            until_date = calculate_until_date(duration)
-            await context.bot.ban_chat_member(chat_id=PUBLIC_CHAT_ID, user_id=violator_id, until_date=until_date)
-        elif punishment_type == 'warn':
-            add_warning(violator_id, violator_name, violator_username, rule, moderator_username)
-
-        try:
-            pub_msg = await context.bot.send_message(chat_id=PUBLIC_CHAT_ID, text=notification, parse_mode='HTML')
-            asyncio.create_task(delete_messages_after_delay(
-                context, PUBLIC_CHAT_ID, [pub_msg.message_id], 120))
-        except Exception as e:
-            logger.error(f"Notification error: {e}")
-
-        end_date = "—"
-        if punishment_type in ['mute', 'ban'] and duration != 'forever':
-            until_date_calc = calculate_until_date(duration)
-            if until_date_calc:
-                end_date = datetime.fromtimestamp(until_date_calc, tz=MSK).strftime('%d.%m.%Y %H:%M')
-
-        log_text = (
-            f"{emoji[punishment_type]} <b>ВЫДАН {name[punishment_type].upper()}</b>\n\n"
-            f"👤 @{violator_username} (ID: {violator_id})\n"
-            f"📋 Правило: {rule}\n"
-            f"⏱ Длительность: {dur_text.get(duration, duration)}\n"
-        )
-        if duration != 'forever' and punishment_type in ['mute', 'ban']:
-            log_text += f"🔚 До: {end_date}\n"
-
-        log_text += f"\n🎖 Ранг: {moderator_display} (@{moderator_username})\n"
-
-        if approver_role_obj is not None and approver_role_obj == Role.СЗА:
-            log_text += f"✅ Одобрил: {approver_role_obj.name} (@{approver_username})\n"
-        else:
-            log_text += f"✅ Одобрил: {approver_display}\n"
-
-        log_text += f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
-        await send_log(context, log_text)
-
-        if report_message_id and report_topic_id:
-            try:
-                await context.bot.delete_message(chat_id=MAIN_CHAT_ID, message_id=report_message_id)
-                logger.info(f"✅ Deleted report {report_message_id}")
-            except Exception as e:
-                logger.error(f"❌ Delete error: {e}")
-
+        pub_msg = await context.bot.send_message(
+            chat_id=PUBLIC_CHAT_ID, text=notification, parse_mode='HTML')
+        asyncio.create_task(delete_messages_after_delay(
+            context, PUBLIC_CHAT_ID, [pub_msg.message_id], 120))
     except Exception as e:
-        logger.error(f"Punishment error: {e}")
-        raise
+        logger.error(f"Notification error: {e}")
+
+    # Лог в канал — всегда
+    end_date = "—"
+    if punishment_type in ['mute', 'ban'] and duration != 'forever' and violator_id:
+        until_date_calc = calculate_until_date(duration)
+        if until_date_calc:
+            end_date = datetime.fromtimestamp(until_date_calc, tz=MSK).strftime('%d.%m.%Y %H:%M')
+
+    log_text = (
+        f"{emoji[punishment_type]} <b>ВЫДАН {name[punishment_type].upper()}</b>\n\n"
+        f"👤 @{violator_username} (ID: {violator_id or '—'})\n"
+        f"📋 Правило: {rule}\n"
+        f"⏱ Длительность: {dur_text.get(duration, duration)}\n"
+    )
+    if duration != 'forever' and punishment_type in ['mute', 'ban']:
+        log_text += f"🔚 До: {end_date}\n"
+    if action_error:
+        log_text += f"⚠️ Ошибка действия: {action_error}\n"
+
+    log_text += f"\n🎖 Ранг: {moderator_display} (@{moderator_username})\n"
+    if approver_role_obj is not None and approver_role_obj == Role.СЗА:
+        log_text += f"✅ Одобрил: {approver_role_obj.name} (@{approver_username})\n"
+    else:
+        log_text += f"✅ Одобрил: {approver_display}\n"
+    log_text += f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
+
+    await send_log(context, log_text)
 
 
 async def handle_appeal_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):

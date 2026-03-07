@@ -639,8 +639,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/sp - сбросить принятые отчеты (СЗМ+)\n"
         "/so - сбросить отклоненные отчеты (СЗМ+)\n"
         "/info - информация о пользователе (Мл. Админ+)\n"
-        "/snwarn - снять варн (Ст. Модератор+)\n"
-"/vwarn - выдать варн напрямую (Ст. Модератор+)\n"
+        "/snwarn - снять варн (Мл. Админ+)\n"
+"/vwarn - выдать варн напрямую (Мл. Админ+)\n"
 "/vp - выдать принятый отчёт вручную (СЗМ+)\n"
 "/svp - снять принятый отчёт вручную (СЗМ+)"
         f"{extra_commands}"
@@ -3387,8 +3387,8 @@ async def snwarn_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     issuer = message.from_user
     issuer_role = get_user_role(issuer.username)
 
-    if not can_issue_punishment(issuer_role):
-        err = await message.reply_text("❌ Нет прав! (Ст. Модератор+)")
+    if issuer_role is None or issuer_role < Role.МЛ_АДМИН:
+        err = await message.reply_text("❌ Нет прав! (Мл. Админ+)")
         asyncio.create_task(delete_messages_after_delay(
             context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
         return

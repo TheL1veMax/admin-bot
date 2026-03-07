@@ -640,6 +640,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/so - сбросить отклоненные отчеты (СЗМ+)\n"
         "/info - информация о пользователе (Мл. Админ+)\n"
         "/snwarn - снять один варн (Мл. Админ+)\n"
+"/vwarn - выдать варн напрямую (СЗМ+)\n"
 "/vp - выдать принятый отчёт вручную (СЗМ+)\n"
 "/svp - снять принятый отчёт вручную (СЗМ+)"
         f"{extra_commands}"
@@ -2241,7 +2242,7 @@ async def execute_punishment(context: ContextTypes.DEFAULT_TYPE, punishment_data
                 await context.bot.ban_chat_member(
                     chat_id=PUBLIC_CHAT_ID, user_id=violator_id, until_date=until_date)
             elif punishment_type == 'warn':
-                add_warning(violator_id, violator_name, violator_username, rule, moderator_username)
+                pass  # варн записан в punishments через add_punishment выше
         except Exception as e:
             action_error = str(e)
             logger.error(f"Punishment action error: {e}")
@@ -3648,6 +3649,131 @@ async def svp_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_log(context, log_text)
 
 
+async def vwarn_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Выдать варн напрямую через команду /vwarn (записывается в punishments)"""
+    message = update.message
+    if message.chat.id != ADMIN_GROUP_ID:
+        return
+
+    issuer = message.from_user
+    issuer_display_name = get_display_name(issuer)
+    register_user(issuer.id, issuer.username, issuer_display_name)
+    issuer_role = get_user_role(issuer.username)
+
+    if issuer_role is None or issuer_role < Role.МЛ_АДМИН:
+        err = await message.reply_text("❌ Нет прав! (Мл. Админ+)")
+        asyncio.create_task(delete_messages_after_delay(
+            context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
+        return
+
+    target_user_id = None
+    target_user_name = None
+    target_username = None
+    reason = None
+
+    text = message.text.strip()
+    parts = text.split(maxsplit=2)
+
+    if len(parts) >= 3 and (parts[1].startswith('@') or parts[1].isdigit()):
+        target_username = parts[1].lstrip('@')
+        reason = parts[2]
+        if message.entities:
+            for entity in message.entities:
+                if entity.type == "text_mention":
+                    target_user = entity.user
+                    if target_user.id != 1087968824:
+                        target_user_id = target_user.id
+                        target_user_name = get_display_name(target_user)
+                        target_username = target_user.username or str(target_user_id)
+                        register_user(target_user_id, target_user.username, target_user_name)
+                        break
+        if target_user_id is None:
+            found_id, found_name = find_user_id_by_username(target_username)
+            if found_id:
+                target_user_id = found_id
+                target_user_name = found_name or f"@{target_username}"
+            else:
+                err = await message.reply_text(
+                    f"❌ @{target_username} не найден!\n💡 Попросите написать /start боту")
+                asyncio.create_task(delete_messages_after_delay(
+                    context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
+                return
+    elif message.reply_to_message:
+        target_user = message.reply_to_message.from_user
+        if target_user.id == 1087968824:
+            err = await message.reply_text("❌ Нельзя выдать варн анонимному сообщению!")
+            asyncio.create_task(delete_messages_after_delay(
+                context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
+            return
+        target_user_id = target_user.id
+        target_user_name = get_display_name(target_user)
+        target_username = target_user.username or str(target_user_id)
+        register_user(target_user_id, target_user.username, target_user_name)
+        if len(parts) < 2:
+            err = await message.reply_text("❌ Укажите правило!\n/vwarn правило")
+            asyncio.create_task(delete_messages_after_delay(
+                context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
+            return
+        reason = ' '.join(parts[1:])
+    else:
+        err = await message.reply_text("❌ Формат: /vwarn @username правило")
+        asyncio.create_task(delete_messages_after_delay(
+            context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
+        return
+
+    # Проверяем дубль
+    duplicate = check_duplicate_punishment(target_user_id, reason, 'warn', 'once')
+    if duplicate:
+        days_ago = (datetime.now(MSK) - duplicate['created_at']).days
+        err = await message.reply_text(
+            f'⚠️ @{target_username} уже получал варн за "{reason}" {days_ago} дн. назад!\n'
+            f'Выдать повторно? /vwarn_force @{target_username} {reason}')
+        asyncio.create_task(delete_messages_after_delay(
+            context, message.chat.id, [message.message_id, err.message_id], 60))
+        return
+
+    add_punishment(
+        target_user_id, target_username, target_user_name or f"@{target_username}",
+        'warn', 'once', reason,
+        issuer.id, issuer.username or issuer_display_name,
+        issuer.id, issuer.username or issuer_display_name
+    )
+
+    warn_count = get_user_varn_count(target_user_id)
+    issuer_role_name = get_user_role_name(issuer.username)
+
+    # Уведомление в PUBLIC_CHAT
+    pub_text = f"⚠️ @{target_username} получил варн\n📝 Правило: {reason}"
+    try:
+        pub_msg = await context.bot.send_message(
+            chat_id=PUBLIC_CHAT_ID, text=pub_text, parse_mode='HTML')
+        asyncio.create_task(delete_messages_after_delay(
+            context, PUBLIC_CHAT_ID, [pub_msg.message_id], 120))
+    except Exception as e:
+        logger.error(f"vwarn public notify error: {e}")
+
+    log_text = (
+        f"⚠️ ВАРН ВЫДАН КОМАНДОЙ\n\n"
+        f"👤 Получил: {target_user_name} (@{target_username})\n"
+        f"🆔 ID: {target_user_id}\n"
+        f"📝 Правило: {reason}\n"
+        f"📊 Варнов за 30 дней: {warn_count}\n"
+        f"👨‍💼 Выдал: @{issuer.username} ({issuer_role_name})\n"
+        f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
+    )
+    await send_log(context, log_text)
+
+    user_link = f"<a href='tg://user?id={target_user_id}'>{target_user_name}</a>"
+    success = await message.reply_text(
+        f"✅ Варн выдан {user_link}\n"
+        f"📝 Правило: {reason}\n"
+        f"📊 Варнов за 30 дней: {warn_count}",
+        parse_mode='HTML'
+    )
+    asyncio.create_task(delete_messages_after_delay(
+        context, message.chat.id, [message.message_id, success.message_id], PUNISHMENT_DELETE_SECONDS))
+
+
 def main():
     if not DATABASE_URL:
         logger.error("❌ DATABASE_URL не задан!")
@@ -3680,6 +3806,7 @@ def main():
     application.add_handler(CommandHandler("obv", announcement_command))
     application.add_handler(CommandHandler("info", info_command))
     application.add_handler(CommandHandler("snwarn", snwarn_command))
+    application.add_handler(CommandHandler("vwarn", vwarn_command))
     application.add_handler(CommandHandler("vp", vp_command))
     application.add_handler(CommandHandler("svp", svp_command))
     application.add_handler(CommandHandler("obn", obn_command))

@@ -639,8 +639,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/sp - сбросить принятые отчеты (СЗМ+)\n"
         "/so - сбросить отклоненные отчеты (СЗМ+)\n"
         "/info - информация о пользователе (Мл. Админ+)\n"
-        "/snwarn - снять один варн (Мл. Админ+)\n"
-"/vwarn - выдать варн напрямую (СЗМ+)\n"
+        "/snwarn - снять варн (Мл. Админ+)\n"
+"/vwarn - выдать варн напрямую (Мл. Админ+)\n"
 "/vp - выдать принятый отчёт вручную (СЗМ+)\n"
 "/svp - снять принятый отчёт вручную (СЗМ+)"
         f"{extra_commands}"
@@ -3246,6 +3246,7 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
     issuer = message.from_user
     issuer_role = get_user_role(issuer.username)
+    in_admin_group = message.chat.id == ADMIN_GROUP_ID
 
     if issuer_role is None or issuer_role < Role.МЛ_АДМИН:
         err = await message.reply_text("❌ Нет прав! (Мл. Админ+)")
@@ -3307,9 +3308,9 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     uid = user_row['user_id']
     uname = f"@{user_row['username']}" if user_row['username'] else user_row['full_name']
-    role_name = get_user_role_name(user_row['username']) if user_row['username'] else "Участник"
 
     warn_count = get_user_warn_count(uid)
+    varn_count = get_user_varn_count(uid)
     bl = get_user_blacklist_status(uid)
     recent_puns = get_user_recent_punishments(uid, 6)
 
@@ -3318,7 +3319,6 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         end_dt = bl['end_date']
         if end_dt:
             now_msk = datetime.now(MSK)
-            # end_dt может быть без timezone
             if end_dt.tzinfo is None:
                 from zoneinfo import ZoneInfo as _ZI
                 end_dt = end_dt.replace(tzinfo=_ZI('Europe/Moscow'))
@@ -3341,24 +3341,37 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         bl_text = "✅ Нет"
 
-    # Последние наказания
-    pun_lines = ""
-    if recent_puns:
-        pun_lines = "\n\n📋 <b>Последние наказания:</b>"
-        for p in recent_puns:
-            pun_fmt = format_punishment(p['punishment_type'], p['duration'])
-            date_str = fmt_dt(p['created_at'])
-            pun_lines += f"\n• {pun_fmt} — {date_str}"
+    if in_admin_group:
+        # Полная информация в группе админов
+        role_name = get_user_role_name(user_row['username']) if user_row['username'] else "Участник"
 
-    info_text = (
-        f"👤 <b>Информация о пользователе</b>\n\n"
-        f"🆔 ID: <code>{uid}</code>\n"
-        f"👤 Юзер: {uname}\n"
-        f"🎖 Роль: {role_name}\n"
-        f"⚠️ Варны: <b>{warn_count}</b>\n"
-        f"🚫 ЧС Админки: {bl_text}"
-        f"{pun_lines}"
-    )
+        pun_lines = ""
+        if recent_puns:
+            pun_lines = "\n\n📋 <b>Последние наказания:</b>"
+            for p in recent_puns:
+                pun_fmt = format_punishment(p['punishment_type'], p['duration'])
+                date_str = fmt_dt(p['created_at'])
+                pun_lines += f"\n• {pun_fmt} — {date_str}"
+
+        info_text = (
+            f"👤 <b>Информация о пользователе</b>\n\n"
+            f"🆔 ID: <code>{uid}</code>\n"
+            f"👤 Юзер: {uname}\n"
+            f"🎖 Роль: {role_name}\n"
+            f"📢 Выговоры: <b>{warn_count}</b>\n"
+            f"⚠️ Варны: <b>{varn_count}</b>\n"
+            f"🚫 ЧС Админки: {bl_text}"
+            f"{pun_lines}"
+        )
+    else:
+        # Публичный чат — без роли и наказаний
+        info_text = (
+            f"👤 <b>Информация о пользователе</b>\n\n"
+            f"🆔 ID: <code>{uid}</code>\n"
+            f"👤 Юзер: {uname}\n"
+            f"🎖 Роль: (нет информации)\n"
+            f"🚫 ЧС Админки: {bl_text}"
+        )
 
     reply = await message.reply_text(info_text, parse_mode='HTML')
     asyncio.create_task(delete_messages_after_delay(
@@ -3413,25 +3426,54 @@ async def snwarn_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
         return
 
-    result = remove_one_warn(target_user_id)
     display = f"@{target_username}" if target_username else f"ID {target_user_id}"
 
-    if result == -1:
-        err = await message.reply_text(f"ℹ️ У {display} нет активных варнов.")
-        asyncio.create_task(delete_messages_after_delay(
-            context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
-    elif result is None:
+    # Снимаем самый свежий варн из таблицы punishments
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id FROM punishments
+                    WHERE user_id = %s AND punishment_type = 'warn'
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """, (target_user_id,))
+                row = cur.fetchone()
+                if not row:
+                    err = await message.reply_text(f"ℹ️ У {display} нет активных варнов.")
+                    asyncio.create_task(delete_messages_after_delay(
+                        context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
+                    return
+                cur.execute("DELETE FROM punishments WHERE id = %s", (row[0],))
+                cur.execute("""
+                    SELECT COUNT(*) FROM punishments
+                    WHERE user_id = %s AND punishment_type = 'warn'
+                    AND created_at > NOW() - INTERVAL '30 days'
+                """, (target_user_id,))
+                remaining = cur.fetchone()[0]
+    except Exception as e:
+        logger.error(f"snwarn error: {e}")
         err = await message.reply_text("❌ Ошибка при снятии варна.")
         asyncio.create_task(delete_messages_after_delay(
             context, message.chat.id, [message.message_id, err.message_id], DELETE_AFTER_SECONDS))
-    else:
-        reply = await message.reply_text(
-            f"✅ Варн снят с {display}\n"
-            f"⚠️ Оставшихся варнов: <b>{result}</b>",
-            parse_mode='HTML'
-        )
-        asyncio.create_task(delete_messages_after_delay(
-            context, message.chat.id, [message.message_id, reply.message_id], DELETE_AFTER_SECONDS))
+        return
+
+    log_text = (
+        f"✅ ВАРН СНЯТ\n\n"
+        f"👤 У кого: {display}\n"
+        f"📊 Варнов за 30 дней: {remaining}\n"
+        f"👨\u200d💼 Снял: @{message.from_user.username} ({get_user_role_name(message.from_user.username)})\n"
+        f"⏰ {datetime.now(MSK).strftime('%d.%m.%Y %H:%M')}"
+    )
+    await send_log(context, log_text)
+
+    reply = await message.reply_text(
+        f"✅ Варн снят с {display}\n"
+        f"⚠️ Оставшихся варнов за 30 дней: <b>{remaining}</b>",
+        parse_mode='HTML'
+    )
+    asyncio.create_task(delete_messages_after_delay(
+        context, message.chat.id, [message.message_id, reply.message_id], DELETE_AFTER_SECONDS))
 
 
 async def vp_command(update: Update, context: ContextTypes.DEFAULT_TYPE):

@@ -66,7 +66,7 @@ USERS_ROLES = {
     'qwertyuiopasdfghjklzxcvbnm123411': Role.ЗАМ_ГЛАВНОГО,
     'whysparky': Role.КУРАТОР,
     'stadm': Role.СТАРШИЙ_АДМИН,
-    'whysparky': Role.СЗМ,
+    'polinnnkka0': Role.СЗМ,
     'maga8c': Role.АДМИН,
     'mladmin': Role.МЛ_АДМИН,
     'mladmin2': Role.МЛ_АДМИН,

@@ -64,7 +64,7 @@ USERS_ROLES = {
     'gerrinetwork': Role.СЗА,
     'mskmboky': Role.ТС,
     'qwertyuiopasdfghjklzxcvbnm123411': Role.ЗАМ_ГЛАВНОГО,
-    's1mka2': Role.КУРАТОР,
+    'whysparky': Role.КУРАТОР,
     'stadm': Role.СТАРШИЙ_АДМИН,
     'whysparky': Role.СЗМ,
     'maga8c': Role.АДМИН,
